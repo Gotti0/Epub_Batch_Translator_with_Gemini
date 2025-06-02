@@ -46,7 +46,7 @@ class ConfigManager:
             "requests_per_minute": 60, # 분당 요청 수 제한 (0 또는 None이면 제한 없음)
             "novel_language": "auto", # 로어북 추출 및 번역 출발 언어 (자동 감지)
             "novel_language_fallback": "ja", # 자동 감지 실패 시 사용할 폴백 언어
-            "model_name": "gemini-1.5-flash-latest",
+            "model_name": "gemini-2.0-flash",
             "temperature": 0.7,
             "top_p": 0.9,
             "prompts": (
@@ -105,12 +105,12 @@ class ConfigManager:
             "lorebook_max_chars_per_entry": 200,
             "lorebook_keyword_sensitivity": "medium",
             "lorebook_priority_settings": {
-                "character": 8,
-                "worldview": 10,
-                "story_element": 7
+                "character": 5,
+                "worldview": 5,
+                "story_element": 5
             },
             "lorebook_chunk_size": 8000,
-            "lorebook_ai_prompt_template": "다음 텍스트에서 주요 등장인물, 장소, 아이템, 중요 사건, 설정 등을 키워드, 설명, 카테고리 형식으로 추출하여 JSON 배열로 반환해주세요. 각 항목은 'keyword', 'description', 'category', 'importance'(1-10), 'isSpoiler'(true/false) 키를 가져야 합니다. 설명은 {max_chars_per_entry}자를 넘지 않도록 요약하고, 최대 {max_entries_per_segment}개의 항목만 추출하세요. 텍스트: ```\n{novelText}\n```\nJSON 형식으로만 응답해주세요.",
+            "lorebook_ai_prompt_template": "First, identify the BCP-47 language code of the following text.\nThen, using that identified language as the source language for the keywords, extract major characters, places, items, important events, settings, etc., from the text.\nEach item in the 'entities' array should have 'keyword', 'description', 'category', 'importance'(1-10), 'isSpoiler'(true/false) keys.\nSummarize descriptions to not exceed {max_chars_per_entry} characters, and extract a maximum of {max_entries_per_segment} items.\nFor keyword extraction, set sensitivity to {keyword_sensitivity} and prioritize items based on: {priority_settings}.\nText: ```\n{novelText}\n```\nRespond with a single JSON object containing two keys:\n1. 'detected_language_code': The BCP-47 language code you identified (string).\n2. 'entities': The JSON array of extracted lorebook entries.\nExample response:\n{\n  \"detected_language_code\": \"ja\",\n  \"entities\": [\n    {\"keyword\": \"主人公\", \"description\": \"物語の主要なキャラクター\", \"category\": \"인물\", \"importance\": 10, \"isSpoiler\": false}\n  ]\n}\nEnsure your entire response is a single valid JSON object.",
             "lorebook_conflict_resolution_batch_size": 5,
             # 후처리 관련 설정 (기존 위치에서 이동 또는 기본값으로 통합)
             "remove_translation_headers": True,
@@ -125,8 +125,7 @@ class ConfigManager:
             # 동적 로어북 주입 설정
             "enable_dynamic_lorebook_injection": False,
             "max_lorebook_entries_per_chunk_injection": 3,
-            "max_lorebook_chars_per_chunk_injection": 500,
-            "lorebook_json_path_for_injection": None # 동적 주입용 로어북 경로
+            "max_lorebook_chars_per_chunk_injection": 500
         }
 
     def load_config(self, use_default_if_missing: bool = True) -> Dict[str, Any]:
@@ -232,7 +231,7 @@ if __name__ == '__main__':
     manager_no_file = ConfigManager(default_config_path)
     config1 = manager_no_file.load_config()
     print(f"로드된 설정 (파일 없음): {json.dumps(config1, indent=2, ensure_ascii=False)}")
-    assert config1["model_name"] == "gemini-1.5-flash-latest"
+    assert config1["model_name"] == "gemini-2.0-flash"
     assert config1["api_key"] == ""
     assert config1["api_keys"] == [] 
     assert config1["service_account_file_path"] is None
@@ -244,7 +243,6 @@ if __name__ == '__main__':
     assert config1["enable_dynamic_lorebook_injection"] is False
     assert config1["max_lorebook_entries_per_chunk_injection"] == 3
     assert config1["max_lorebook_chars_per_chunk_injection"] == 500
-    assert config1["lorebook_json_path_for_injection"] is None
 
     print("\n--- 2. 설정 저장 테스트 (api_keys 및 max_workers 사용) ---")
     config_to_save = manager_no_file.get_default_config()
@@ -258,7 +256,7 @@ if __name__ == '__main__':
     config_to_save["max_workers"] = 4 # max_workers 값 설정
     config_to_save["requests_per_minute"] = 30 
     config_to_save["enable_dynamic_lorebook_injection"] = True
-    config_to_save["lorebook_json_path_for_injection"] = "path/to/injection_lorebook.json"
+    config_to_save["lorebook_json_path"] = "path/to/active_lorebook.json" # 통합된 경로 사용 예시
     save_success = manager_no_file.save_config(config_to_save)
     print(f"설정 저장 성공 여부: {save_success}")
     assert save_success
@@ -283,7 +281,7 @@ if __name__ == '__main__':
     assert config2["max_workers"] == 4 # 저장된 max_workers 값 확인
     assert config2["enable_dynamic_lorebook_injection"] is True
     assert config2["max_lorebook_entries_per_chunk_injection"] == 3 # 기본값 유지 확인
-    assert config2["lorebook_json_path_for_injection"] == "path/to/injection_lorebook.json"
+    assert config2["lorebook_json_path"] == "path/to/active_lorebook.json" # 통합된 경로 확인
 
     print("\n--- 4. 부분 설정 파일 로드 테스트 (api_key만 있고 api_keys는 없는 경우) ---")
     partial_config_path_api_key_only = test_output_dir / "partial_api_key_only.json"
@@ -303,7 +301,7 @@ if __name__ == '__main__':
     assert config3["api_key"] == "single_api_key_test"
     assert config3["api_keys"] == ["single_api_key_test"] 
     assert config3["temperature"] == 0.5
-    assert config3["model_name"] == "gemini-1.5-flash-latest"
+    assert config3["model_name"] == "gemini-2.0-flash"
     assert config3.get("lorebook_sampling_ratio") == 50.0 # 저장된 로어북 설정 확인
     assert config3.get("lorebook_max_entries_per_segment") == 5 # 기본 로어북 설정 확인
     assert config3["max_workers"] == (os.cpu_count() or 1) # 잘못된 값일 경우 기본값으로 복원되는지 확인
@@ -326,7 +324,7 @@ if __name__ == '__main__':
     assert config4["api_keys"] == ["list_key1", "list_key2"]
     assert config4["api_key"] == "list_key1" 
     assert config4["chunk_size"] == 7000
-    assert config4["model_name"] == "gemini-1.5-flash-latest"
+    assert config4["model_name"] == "gemini-2.0-flash"
     assert config4["max_workers"] == (os.cpu_count() or 1) # 0 이하의 값일 경우 기본값으로 복원
 
     print("\n테스트 완료.")
