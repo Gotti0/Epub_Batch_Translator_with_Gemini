@@ -369,8 +369,6 @@ class GeminiClient:
         generation_config_dict: Optional[Dict[str, Any]] = None,
         safety_settings_list_of_dicts: Optional[List[Dict[str, Any]]] = None,
         system_instruction_text: Optional[str] = None, 
-        tools: Optional[List[genai_types.Tool]] = None, # Function Calling용 tools 추가
-        tool_config: Optional[genai_types.ToolConfig] = None, # Function Calling용 tool_config 추가
         max_retries: int = 5, 
         initial_backoff: float = 2.0,
         max_backoff: float = 60.0,
@@ -430,8 +428,6 @@ class GeminiClient:
                         response = self.client.models.generate_content_stream(
                             model=effective_model_name,
                             contents=final_contents,
-                            tools=tools, # tools 전달
-                            tool_config=tool_config, # tool_config 전달
                             config=genai_types.GenerateContentConfig(
                                 **generation_config_dict
                             ) if generation_config_dict else None
@@ -453,13 +449,10 @@ class GeminiClient:
                         response = self.client.models.generate_content(
                             model=effective_model_name,
                             contents=final_contents,
-                            tools=tools, # tools 전달
-                            tool_config=tool_config, # tool_config 전달
                             config=genai_types.GenerateContentConfig(
                                 **generation_config_dict
                             ) if generation_config_dict else None
                         )
-<<<<<<< HEAD
                         if self._is_content_safety_error(response=response):
                             raise GeminiContentSafetyException("콘텐츠 안전 문제로 응답 차단")
                         if hasattr(response, 'text') and response.text is not None:
@@ -472,37 +465,6 @@ class GeminiClient:
                                         break 
                             if text_content_from_api is None:
                                 text_content_from_api = ""
-=======
-
-
-                    if self._is_content_safety_error(response=response):
-                        # ... (안전 오류 처리) ...
-                        raise GeminiContentSafetyException("콘텐츠 안전 문제로 응답 차단")
-
-                    text_content_from_api: Optional[str] = None
-                    if hasattr(response, 'text') and response.text is not None:
-                        # 일반 텍스트 응답 (Function Call이 아닌 경우)
-                        text_content_from_api = response.text
-                    elif hasattr(response, 'candidates') and response.candidates:
-                        for candidate in response.candidates:
-                            if hasattr(candidate, 'content') and candidate.content and \
-                               hasattr(candidate.content, 'parts') and candidate.content.parts:
-                                # Function Call 응답 확인
-                                if candidate.content.parts[0].function_call:
-                                    function_call_args = candidate.content.parts[0].function_call.args
-                                    logger.info(f"Function call 응답 수신: {candidate.content.parts[0].function_call.name}")
-                                    # function_call.args는 이미 dict 형태일 것으로 예상됨
-                                    return dict(function_call_args) # 파싱된 dict 반환
-
-                                # 일반 텍스트 응답 (Function Call이 아닌 경우)
-                                if candidate.finish_reason == FinishReason.STOP:
-                                    text_content_from_api = "".join(part.text for part in candidate.content.parts if hasattr(part, "text") and part.text)
-                                    break # 첫 번째 유효한 후보 사용
-                        if text_content_from_api is None: # 정상 종료했으나 내용이 없는 경우
-                            text_content_from_api = "" 
-                    else: # response.text도 없고, candidates도 없는 경우 (드묾)
-                        logger.warning("API 응답에 text 또는 candidates 필드가 없습니다.")
->>>>>>> f5198730e15feacfcd6059d0d79fea59199de982
 
                     if text_content_from_api is not None:
                         # generation_config_dict가 None일 수 있으므로 확인

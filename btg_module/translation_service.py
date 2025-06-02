@@ -6,7 +6,6 @@ import csv
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 import os
-import json # JSON 모듈 임포트
 
 try:
     from .gemini_client import (
@@ -17,7 +16,7 @@ try:
         GeminiInvalidRequestException,
         GeminiAllApiKeysExhaustedException 
     )
-    from .file_handler import read_json_file, read_text_file # read_text_file도 필요할 수 있음 (스키마 파일이 일반 텍스트일 경우)
+    from .file_handler import read_json_file # JSON 로딩을 위해 추가
     from .logger_config import setup_logger
     from .exceptions import BtgTranslationException, BtgApiClientException
     from .chunk_service import ChunkService
@@ -34,12 +33,11 @@ except ImportError:
         GeminiInvalidRequestException,
         GeminiAllApiKeysExhaustedException 
     )
-    from file_handler import read_json_file, read_text_file
+    from file_handler import read_json_file # JSON 로딩을 위해 추가
     from logger_config import setup_logger
     from exceptions import BtgTranslationException, BtgApiClientException
     from chunk_service import ChunkService
-    from dtos import LorebookEntryDTO
-    from google.genai import types as genai_types # Function Calling을 위해 추가
+    from dtos import LorebookEntryDTO # 로어북 DTO 임포트
     # from google.genai import types as genai_types # Fallback import
 
 logger = setup_logger(__name__)
@@ -285,180 +283,6 @@ class TranslationService:
         final_text = translated_text 
         return final_text.strip()
     
-    def _load_response_schema(self, schema_name: str) -> Optional[Dict[str, Any]]:
-        """
-        지정된 이름의 응답 스키마 JSON 파일을 로드합니다.
-        스키마 파일은 설정된 'response_schemas_dir' 디렉토리에서 찾습니다.
-        """
-        schemas_dir_path_str = self.config.get("response_schemas_dir")
-        if not schemas_dir_path_str:
-            logger.warning("응답 스키마 디렉토리('response_schemas_dir')가 설정되지 않았습니다. 스키마를 로드할 수 없습니다.")
-            return None
-        
-        schema_file_path = Path(schemas_dir_path_str) / (schema_name if schema_name.endswith(".json") else f"{schema_name}.json")
-        
-        if not schema_file_path.exists() or not schema_file_path.is_file():
-            logger.warning(f"응답 스키마 파일을 찾을 수 없습니다: '{schema_file_path}'")
-            return None
-        
-        try:
-            # file_handler.read_json_file은 이미 JSON 파싱을 수행합니다.
-            schema_content = read_json_file(schema_file_path)
-            if not isinstance(schema_content, dict): # 스키마는 보통 dict 형태
-                logger.error(f"로드된 스키마 '{schema_name}'의 내용이 JSON 객체(dict)가 아닙니다. 타입: {type(schema_content)}")
-                return None
-            logger.info(f"응답 스키마 '{schema_name}'을(를) '{schema_file_path}'에서 성공적으로 로드했습니다.")
-            return schema_content
-        except json.JSONDecodeError as e_json:
-            logger.error(f"응답 스키마 파일 '{schema_file_path}' 파싱 중 JSON 오류 발생: {e_json}")
-            return None
-        except Exception as e:
-            logger.error(f"응답 스키마 파일 '{schema_file_path}' 로드 중 예상치 못한 오류 발생: {e}", exc_info=True)
-            return None
-
-    def request_structured_reconstruction(
-        self,
-        primary_translated_text: str,
-        original_html_structure_info: Any,
-        response_schema_name: str,
-        generation_config_overrides: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Phase 3 (2단계 파이프라인): 1차 번역된 텍스트와 원본 HTML 구조 정보를 바탕으로
-        Gemini API에 구조화된 재구성을 요청합니다.
-        """
-        if not self.gemini_client:
-            raise BtgTranslationException("GeminiClient가 초기화되지 않아 구조화된 재구성을 요청할 수 없습니다.")
-
-        json_schema_definition = self._load_response_schema(response_schema_name)
-        if not json_schema_definition:
-            logger.warning(f"스키마 '{response_schema_name}' 로드 실패. 스키마 없이 진행하거나 오류 처리 필요.")
-            # 필요시 여기서 예외 발생: raise BtgConfigException(f"응답 스키마 '{response_schema_name}'을 로드할 수 없습니다.")
-
-        # 프롬프트 구성
-        prompt = f"""
-        다음은 1차 번역된 텍스트와 원본 HTML 구조 정보입니다.
-        이 정보들을 바탕으로 콘텐츠를 재구성하여, 아래 명시된 JSON 스키마에 따라 응답해주세요.
-
-        JSON 스키마:
-        ```json
-        {json.dumps(json_schema_definition, indent=2, ensure_ascii=False) if json_schema_definition else "제공된 스키마 없음. 일반적인 구조화된 JSON으로 응답해주세요."}
-        ```
-
-        1차 번역된 텍스트:
-        ---
-        {primary_translated_text}
-        ---
-
-        원본 HTML 구조 정보:
-        ---
-        {json.dumps(original_html_structure_info, indent=2, ensure_ascii=False) if isinstance(original_html_structure_info, (dict, list)) else str(original_html_structure_info)}
-        ---
-
-        요청: 위의 정보를 사용하여 콘텐츠를 재구성하고, 명시된 JSON 스키마에 맞는 JSON 객체로만 응답해주세요.
-        다른 설명이나 추가 텍스트 없이 JSON 객체만 반환해야 합니다.
-        """
-
-        effective_gen_config = {
-            "temperature": self.config.get("temperature", 0.3), # 구조화 작업에는 낮은 온도가 적합할 수 있음
-            "top_p": self.config.get("top_p", 0.9),
-            "response_mime_type": "application/json" # JSON 응답 요청
-        }
-        if generation_config_overrides:
-            effective_gen_config.update(generation_config_overrides)
-
-        try:
-            logger.info(f"구조화된 재구성 요청 시작 (스키마: {response_schema_name}).")
-            response_data = self.gemini_client.generate_text(
-                prompt=prompt,
-                model_name=self.config.get("model_name", "gemini-1.5-flash-latest"),
-                generation_config_dict=effective_gen_config
-            )
-            if isinstance(response_data, dict):
-                return response_data
-            elif isinstance(response_data, str): # GeminiClient가 JSON 파싱에 실패한 경우
-                logger.warning("GeminiClient가 JSON 문자열을 반환했습니다 (파싱 실패 또는 API가 JSON 아닌 응답). 재파싱 시도.")
-                try:
-                    return json.loads(response_data)
-                except json.JSONDecodeError as e_json_reparse:
-                    raise BtgTranslationException(f"구조화된 재구성 응답 파싱 실패: {e_json_reparse}. 응답: {response_data[:200]}...", original_exception=e_json_reparse)
-            else:
-                raise BtgTranslationException(f"구조화된 재구성 요청에 대한 예상치 않은 응답 타입: {type(response_data)}")
-        except (BtgApiClientException, GeminiAllApiKeysExhaustedException) as e_api:
-            logger.error(f"구조화된 재구성 중 API 오류: {e_api}", exc_info=True)
-            raise # BtgIntegrationService에서 처리하도록 그대로 전달
-        except Exception as e:
-            logger.error(f"구조화된 재구성 중 예상치 못한 오류: {e}", exc_info=True)
-            raise BtgTranslationException(f"구조화된 재구성 중 오류 발생: {e}", original_exception=e) from e
-
-    def request_direct_structured_translation(
-        self,
-        content_to_translate: str,
-        source_lang: str,
-        target_lang: str,
-        response_schema_name: str,
-        generation_config_overrides: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Phase 3 (제한적 구조화 출력): 특정 콘텐츠에 대해 직접 구조화된 번역 출력을 요청합니다.
-        """
-        if not self.gemini_client:
-            raise BtgTranslationException("GeminiClient가 초기화되지 않아 직접 구조화된 번역을 요청할 수 없습니다.")
-
-        json_schema_definition = self._load_response_schema(response_schema_name)
-        # 스키마 로드 실패 시 처리 (위와 유사)
-        if not json_schema_definition:
-            logger.warning(f"스키마 '{response_schema_name}' 로드 실패. 스키마 없이 진행하거나 오류 처리 필요.")
-
-        prompt = f"""
-        다음 텍스트를 {source_lang}에서 {target_lang}(으)로 번역하고, 결과를 아래 명시된 JSON 스키마에 따라 구조화해주세요.
-
-        JSON 스키마:
-        ```json
-        {json.dumps(json_schema_definition, indent=2, ensure_ascii=False) if json_schema_definition else "제공된 스키마 없음. 일반적인 구조화된 JSON으로 응답해주세요."}
-        ```
-
-        번역 및 구조화할 원본 텍스트 ({source_lang}):
-        ---
-        {content_to_translate}
-        ---
-
-        요청: 위의 텍스트를 {target_lang}(으)로 번역하고, 그 결과를 명시된 JSON 스키마에 맞는 JSON 객체로만 응답해주세요.
-        다른 설명이나 추가 텍스트 없이 JSON 객체만 반환해야 합니다.
-        """
-
-        effective_gen_config = {
-            "temperature": self.config.get("temperature", 0.5), # 번역과 구조화를 동시에 하므로 약간의 유연성
-            "top_p": self.config.get("top_p", 0.9),
-            "response_mime_type": "application/json"
-        }
-        if generation_config_overrides:
-            effective_gen_config.update(generation_config_overrides)
-
-        try:
-            logger.info(f"직접 구조화 번역 요청 시작 (스키마: {response_schema_name}, {source_lang} -> {target_lang}).")
-            response_data = self.gemini_client.generate_text(
-                prompt=prompt,
-                model_name=self.config.get("model_name", "gemini-1.5-flash-latest"),
-                generation_config_dict=effective_gen_config
-            )
-            if isinstance(response_data, dict):
-                return response_data
-            elif isinstance(response_data, str):
-                logger.warning("GeminiClient가 JSON 문자열을 반환했습니다 (직접 구조화 번역). 재파싱 시도.")
-                try:
-                    return json.loads(response_data)
-                except json.JSONDecodeError as e_json_reparse:
-                    raise BtgTranslationException(f"직접 구조화 번역 응답 파싱 실패: {e_json_reparse}. 응답: {response_data[:200]}...", original_exception=e_json_reparse)
-            else:
-                raise BtgTranslationException(f"직접 구조화 번역 요청에 대한 예상치 않은 응답 타입: {type(response_data)}")
-        except (BtgApiClientException, GeminiAllApiKeysExhaustedException) as e_api:
-            logger.error(f"직접 구조화 번역 중 API 오류: {e_api}", exc_info=True)
-            raise
-        except Exception as e:
-            logger.error(f"직접 구조화 번역 중 예상치 못한 오류: {e}", exc_info=True)
-            raise BtgTranslationException(f"직접 구조화 번역 중 오류 발생: {e}", original_exception=e) from e
-
     def translate_text_with_content_safety_retry(
         self, 
         text_chunk: str, 

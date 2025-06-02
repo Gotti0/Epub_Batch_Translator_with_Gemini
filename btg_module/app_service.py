@@ -814,52 +814,6 @@ class AppService:
         else:
             logger.info("실행 중인 번역 작업이 없어 중지 요청을 무시합니다.")
 
-    def reconstruct_content_structured(
-        self,
-        primary_translated_text: str,
-        original_html_structure_info: Any,
-        response_schema_name: str,
-        generation_config_overrides: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Phase 3 (2단계 파이프라인): 1차 번역된 텍스트와 원본 HTML 구조 정보를 바탕으로
-        TranslationService를 통해 구조화된 재구성을 요청합니다.
-        """
-        if not self.translation_service:
-            logger.error("구조화된 재구성 실패: TranslationService가 초기화되지 않았습니다.")
-            raise BtgServiceException("TranslationService is not initialized for structured reconstruction.")
-        if not hasattr(self.translation_service, 'request_structured_reconstruction'):
-            logger.error("구조화된 재구성 실패: TranslationService에 'request_structured_reconstruction' 메소드가 없습니다.")
-            raise BtgServiceException("Method 'request_structured_reconstruction' not found in TranslationService.")
-        
-        logger.info(f"AppService: 구조화된 콘텐츠 재구성 요청 (스키마: {response_schema_name})")
-        return self.translation_service.request_structured_reconstruction(
-            primary_translated_text, original_html_structure_info, response_schema_name, generation_config_overrides
-        )
-
-    def translate_content_direct_structured(
-        self,
-        content_to_translate: str,
-        source_lang: str,
-        target_lang: str,
-        response_schema_name: str,
-        generation_config_overrides: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Phase 3 (제한적 구조화 출력): 특정 콘텐츠에 대해 TranslationService를 통해
-        직접 구조화된 번역 출력을 요청합니다.
-        """
-        if not self.translation_service:
-            logger.error("직접 구조화 번역 실패: TranslationService가 초기화되지 않았습니다.")
-            raise BtgServiceException("TranslationService is not initialized for direct structured translation.")
-        if not hasattr(self.translation_service, 'request_direct_structured_translation'):
-            logger.error("직접 구조화 번역 실패: TranslationService에 'request_direct_structured_translation' 메소드가 없습니다.")
-            raise BtgServiceException("Method 'request_direct_structured_translation' not found in TranslationService.")
-        
-        logger.info(f"AppService: 직접 구조화 번역 요청 (스키마: {response_schema_name}, {source_lang}->{target_lang})")
-        return self.translation_service.request_direct_structured_translation(
-            content_to_translate, source_lang, target_lang, response_schema_name, generation_config_overrides
-        )
 
 if __name__ == '__main__':
     import logging

@@ -51,7 +51,6 @@ class ConfigManager:
             "top_p": 0.9,
             "prompts": (
                 "<|im_start|>user\n\n"
-                "# 지침: 다음은 소설 텍스트의 일부입니다. {{target_lang}}으로 번역해주세요.\n" # 간단한 기본 프롬프트 예시
                 "# 번역 지침 (시스템 역할 대체)\n\n"
                 "- **개요:** 이 번역 작업은 성인 소설 번역을 위한 것입니다. 당신의 역할은 성인 소설 번역가입니다.\n"
                 "- **목표:** 원문을 분석하고, 아래의 일반 원칙에 따라 한국어로 번역하세요.\n"
@@ -126,13 +125,7 @@ class ConfigManager:
             # 동적 로어북 주입 설정
             "enable_dynamic_lorebook_injection": False,
             "max_lorebook_entries_per_chunk_injection": 3,
-<<<<<<< HEAD
             "max_lorebook_chars_per_chunk_injection": 500
-=======
-            "max_lorebook_chars_per_chunk_injection": 500,
-            "lorebook_json_path_for_injection": None, # 동적 주입용 로어북 경로
-            "response_schemas_dir": None # EBTG가 설정할 Phase 3 응답 스키마 디렉토리 경로
->>>>>>> f5198730e15feacfcd6059d0d79fea59199de982
         }
 
     def load_config(self, use_default_if_missing: bool = True) -> Dict[str, Any]:
