@@ -3,7 +3,7 @@ import time
 import random
 import re
 import csv
-from pathlib import Path
+import json # For formatting content_items in prompt
 from typing import Dict, Any, Optional, List, Union
 import os
 
@@ -16,7 +16,7 @@ try:
         GeminiInvalidRequestException,
         GeminiAllApiKeysExhaustedException 
     )
-    from .file_handler import read_json_file # JSON 로딩을 위해 추가
+    from .file_handler import read_json_file # Not directly used in new method
     from .logger_config import setup_logger
     from .exceptions import BtgTranslationException, BtgApiClientException
     from .chunk_service import ChunkService
@@ -33,7 +33,7 @@ except ImportError:
         GeminiInvalidRequestException,
         GeminiAllApiKeysExhaustedException 
     )
-    from file_handler import read_json_file # JSON 로딩을 위해 추가
+    from file_handler import read_json_file
     from logger_config import setup_logger
     from exceptions import BtgTranslationException, BtgApiClientException
     from chunk_service import ChunkService
@@ -41,6 +41,8 @@ except ImportError:
     # from google.genai import types as genai_types # Fallback import
 
 logger = setup_logger(__name__)
+
+# _format_lorebook_for_prompt and existing _construct_prompt, translate_text, etc. remain for plain text translation.
 
 def _format_lorebook_for_prompt(
     lorebook_entries: List[LorebookEntryDTO],
@@ -430,8 +432,139 @@ class TranslationService:
         
         return final_result
     
+    # --- New methods for XHTML Generation ---
 
+    def _construct_xhtml_generation_prompt(
+        self,
+        prompt_instructions: str,
+        content_items: List[Dict[str, Any]],
+        target_language: str
+    ) -> str:
+        """
+        Constructs the full prompt for the Gemini API to generate an XHTML string.
+        """
+        # Serialize content_items to a JSON string to be embedded in the prompt
+        # This makes it clear to the LLM what the structured input is.
+        try:
+            content_items_json_string = json.dumps(content_items, indent=2, ensure_ascii=False)
+        except TypeError as e:
+            logger.error(f"Error serializing content_items to JSON: {e}. Content items: {content_items}")
+            # Fallback or raise error
+            content_items_json_string = str(content_items) # Simple string representation as fallback
 
+        # Assemble the full prompt
+        # The prompt_instructions should already guide the LLM on how to use the content_items.
+        # We just need to provide the data clearly.
+        full_prompt = f"""{prompt_instructions}
+
+Target language for translation of text elements: {target_language}
+
+The content items to be processed into a single XHTML string are provided below as a JSON array.
+Each object in the array has a "type" ('text' or 'image') and "data".
+For "text" type, "data" is the string to be translated.
+For "image" type, "data" is an object with "src" (to be preserved) and "alt" (to be translated if present).
+
+Content Items:
+```json
+{content_items_json_string}
+```
+
+Please generate the complete XHTML string based on these items and the instructions.
+The response should be a single JSON object containing the key "translated_xhtml_content" with the generated XHTML string as its value.
+"""
+        logger.debug(f"Constructed XHTML generation prompt. Length: {len(full_prompt)}")
+        logger.debug(f"Prompt (first 500 chars): {full_prompt[:500]}")
+        return full_prompt
+
+    def generate_xhtml_from_content_items(
+        self,
+        prompt_instructions: str,
+        content_items: List[Dict[str, Any]],
+        target_language: str,
+        response_schema: Dict[str, Any] # Schema for Gemini API's JSON output
+    ) -> str:
+        """
+        Uses GeminiClient to generate a translated XHTML string from structured content items.
+
+        Args:
+            prompt_instructions: Detailed instructions for the LLM on how to generate XHTML.
+            content_items: A list of dictionaries, where each represents a text block or an image.
+            target_language: The target language for translation.
+            response_schema: The schema Gemini API should use for its JSON output.
+
+        Returns:
+            The generated XHTML string.
+
+        Raises:
+            BtgTranslationException: If XHTML generation fails or the response is not as expected.
+            BtgApiClientException: If there's an issue with the Gemini API call.
+        """
+        if not self.gemini_client:
+            logger.error("GeminiClient is not initialized. Cannot generate XHTML.")
+            raise BtgServiceException("GeminiClient is not initialized.")
+
+        full_prompt = self._construct_xhtml_generation_prompt(
+            prompt_instructions, content_items, target_language
+        )
+
+        # Configuration for the Gemini API call
+        # Temperature/TopP might need specific tuning for XHTML generation
+        generation_config_dict = {
+            "temperature": self.config.get("temperature", 0.5), # Potentially lower temp for more structured output
+            "top_p": self.config.get("top_p", 0.95),
+            "response_mime_type": "application/json",
+            "response_schema": response_schema
+        }
+        
+        model_name = self.config.get("model_name", "gemini-2.0-flash") # Or a model better suited for generation
+
+        logger.info(f"Requesting XHTML generation from Gemini. Model: {model_name}")
+        logger.debug(f"Generation Config for XHTML: {generation_config_dict}")
+
+        try:
+            api_response = self.gemini_client.generate_text(
+                prompt=full_prompt,
+                model_name=model_name,
+                generation_config_dict=generation_config_dict
+            )
+
+            if api_response is None:
+                logger.error("Gemini API returned None for XHTML generation.")
+                raise BtgApiClientException("API returned no response for XHTML generation.")
+
+            if isinstance(api_response, dict):
+                generated_xhtml = api_response.get("translated_xhtml_content")
+                if isinstance(generated_xhtml, str):
+                    logger.info(f"Successfully received generated XHTML string. Length: {len(generated_xhtml)}")
+                    logger.debug(f"Generated XHTML (first 200 chars): {generated_xhtml[:200]}")
+                    return generated_xhtml
+                else:
+                    logger.error(f"API response was a dictionary, but 'translated_xhtml_content' key was missing or not a string. Response: {api_response}")
+                    raise BtgTranslationException("Invalid XHTML generation response format: 'translated_xhtml_content' missing or not a string.")
+            else:
+                # This case should ideally be handled by GeminiClient raising an error if JSON parsing fails
+                # when response_mime_type was "application/json".
+                logger.error(f"Expected a dictionary (JSON object) from Gemini API for XHTML generation, but received type {type(api_response)}. Response: {str(api_response)[:500]}")
+                raise BtgTranslationException(f"Unexpected response type ({type(api_response)}) from API for XHTML generation.")
+
+        except GeminiContentSafetyException as e_safety:
+            logger.warning(f"Content safety issue during XHTML generation: {e_safety}")
+            raise BtgTranslationException(f"XHTML generation blocked due to content safety: {e_safety}", original_exception=e_safety) from e_safety
+        except GeminiAllApiKeysExhaustedException as e_keys:
+            logger.error(f"All API keys exhausted during XHTML generation: {e_keys}")
+            raise BtgApiClientException(f"All API keys exhausted during XHTML generation: {e_keys}", original_exception=e_keys) from e_keys
+        except GeminiRateLimitException as e_rate:
+            logger.error(f"API rate limit exceeded during XHTML generation: {e_rate}")
+            raise BtgApiClientException(f"API rate limit exceeded during XHTML generation: {e_rate}", original_exception=e_rate) from e_rate
+        except GeminiInvalidRequestException as e_invalid:
+            logger.error(f"Invalid API request during XHTML generation: {e_invalid}")
+            raise BtgApiClientException(f"Invalid API request for XHTML generation: {e_invalid}", original_exception=e_invalid) from e_invalid
+        except GeminiApiException as e_api:
+            logger.error(f"General Gemini API error during XHTML generation: {e_api}")
+            raise BtgApiClientException(f"API error during XHTML generation: {e_api}", original_exception=e_api) from e_api
+        except Exception as e:
+            logger.error(f"Unexpected error during XHTML generation: {e}", exc_info=True)
+            raise BtgTranslationException(f"Unexpected error during XHTML generation: {e}", original_exception=e) from e
 
 
 if __name__ == '__main__':
@@ -511,7 +644,7 @@ if __name__ == '__main__':
             is_json_response_expected = generation_config_dict and \
                                         generation_config_dict.get("response_mime_type") == "application/json"
 
-            if is_json_response_expected:
+            if is_json_response_expected and "translated_xhtml_content" not in (generation_config_dict.get("response_schema",{}).get("properties",{})): # Distinguish from XHTML gen
                 return {"translated_text": mock_translation, "mock_json": True}
             else:
                 return mock_translation
@@ -523,6 +656,38 @@ if __name__ == '__main__':
                 {"name": "models/mock-gemini-flash", "short_name": "mock-gemini-flash", "display_name": "Mock Gemini Flash", "description": "A mock flash model.", "input_token_limit": 1000, "output_token_limit": 1000},
                 {"name": "models/mock-gemini-pro", "short_name": "mock-gemini-pro", "display_name": "Mock Gemini Pro", "description": "A mock pro model.", "input_token_limit": 2000, "output_token_limit": 2000},
             ]
+
+    # --- Test for XHTML Generation ---
+    print("\n--- 4. XHTML 생성 테스트 ---")
+    config_xhtml = sample_config_base.copy()
+    gemini_client_for_xhtml = MockGeminiClient(auth_credentials="dummy_api_key_xhtml")
+    translation_service_xhtml = TranslationService(gemini_client_for_xhtml, config_xhtml)
+
+    test_prompt_instructions = "You are an expert XHTML generator. Translate text to Korean."
+    test_content_items = [
+        {"type": "text", "data": "This is the first paragraph."},
+        {"type": "image", "data": {"src": "images/image1.png", "alt": "A cute cat"}},
+        {"type": "text", "data": "This is the second paragraph following the image."}
+    ]
+    test_target_language = "ko"
+    test_response_schema = {
+        "type": "OBJECT",
+        "properties": {"translated_xhtml_content": {"type": "STRING"}}
+    }
+
+    try:
+        generated_xhtml_string = translation_service_xhtml.generate_xhtml_from_content_items(
+            prompt_instructions=test_prompt_instructions,
+            content_items=test_content_items,
+            target_language=test_target_language,
+            response_schema=test_response_schema
+        )
+        print(f"생성된 XHTML: {generated_xhtml_string}")
+        assert "<html>" in generated_xhtml_string
+        assert "[번역됨] This is the first paragraph." in generated_xhtml_string # Check if text was processed
+        assert "src='images/image1.png'" in generated_xhtml_string
+    except Exception as e:
+        print(f"XHTML 생성 테스트 오류: {e}")
 
     sample_config_base = {
         "model_name": "gemini-1.5-flash", "temperature": 0.7, "top_p": 0.9,
@@ -583,5 +748,6 @@ if __name__ == '__main__':
         print(f"예상된 예외 발생 (콘텐츠 안전): {e}")
     except Exception as e:
         print(f"테스트 3 오류: {type(e).__name__} - {e}")
+
 
     print("\n--- TranslationService 테스트 종료 ---")

@@ -34,7 +34,7 @@ try:
     from .chunk_service import ChunkService
     from .exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException
     from .dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 임포트 확인
-    from .post_processing_service import PostProcessingService
+    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
 except ImportError:
     # Fallback imports
     from file_handler import (
@@ -53,7 +53,7 @@ except ImportError:
     from chunk_service import ChunkService
     from exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException
     from dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 임포트 확인
-    from post_processing_service import PostProcessingService
+    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
 
 logger = setup_logger(__name__)
 
@@ -78,7 +78,6 @@ class AppService:
         self.processed_chunks_count = 0
         self.successful_chunks_count = 0
         self.failed_chunks_count = 0
-        self.post_processing_service = PostProcessingService()
 
         self.load_app_config()
 

@@ -99,6 +99,32 @@ class TranslationRequestDTO:
     output_file_path: Union[str, Path]
 
 
+
+# --- EBTG v7 연동을 위한 DTO 추가 ---
+@dataclass
+class XhtmlGenerationRequestDTO:
+    """
+    EBTG -> BTG로 XHTML 생성을 요청하기 위한 DTO입니다.
+    BtgIntegrationService에서 AppService로 전달됩니다.
+    """
+    id_prefix: str  # XHTML 파일 식별용 (예: chapter1.xhtml)
+    prompt_instructions: str # Gemini API에 전달될 XHTML 생성 지침
+    content_items: List[Dict[str, Any]] # 텍스트 블록 및 이미지 정보 리스트
+                                        # 예: [{"type": "text", "data": "..."}, {"type": "image", "data": {"src": "...", "alt": "..."}}]
+    target_language: str # 번역 목표 언어
+    response_schema_for_gemini: Dict[str, Any] # Gemini API가 반환할 JSON 스키마
+
+@dataclass
+class XhtmlGenerationResponseDTO:
+    """
+    BTG -> EBTG로 생성된 XHTML 문자열을 반환하기 위한 DTO입니다.
+    AppService에서 BtgIntegrationService로 반환됩니다.
+    """
+    id_prefix: str
+    generated_xhtml_string: Optional[str] = None
+    error_message: Optional[str] = None
+
+
 if __name__ == '__main__':
     # DTO 사용 예시
     print("--- DTO 사용 예시 ---")
@@ -112,7 +138,7 @@ if __name__ == '__main__':
         successful_chunks=20,
         failed_chunks=5,
         current_status_message="청크 26/100 번역 중...",
-        current_chunk_processing=25 # 추가된 필드 사용 예시
+        current_chunk_processing=25
     )
     print(f"번역 진행: {progress1}")
 
@@ -135,7 +161,7 @@ if __name__ == '__main__':
     print(f"로어북 추출 진행: {lorebook_progress}")
 
     config_display = AppConfigDisplayDTO(
-        model_name="gemini-2.0-flash", 
+        model_name="gemini-2.0-flash",
         temperature=0.8,
         top_p=0.9,
         chunk_size=5000,
@@ -148,3 +174,19 @@ if __name__ == '__main__':
         output_file_path="output/translated_text.txt"
     )
     print(f"번역 요청: {trans_request}")
+
+    # XHTML DTO 예시
+    xhtml_req = XhtmlGenerationRequestDTO(
+        id_prefix="chapter1.xhtml",
+        prompt_instructions="Translate and structure as XHTML.",
+        content_items=[{"type": "text", "data": "Hello"}, {"type": "image", "data": {"src": "img.png", "alt": "Image"}}],
+        target_language="ko",
+        response_schema_for_gemini={"type": "OBJECT", "properties": {"translated_xhtml_content": {"type": "STRING"}}}
+    )
+    print(f"XHTML 생성 요청: {xhtml_req}")
+
+    xhtml_res = XhtmlGenerationResponseDTO(
+        id_prefix="chapter1.xhtml",
+        generated_xhtml_string="<p>안녕</p><img src='img.png' alt='이미지'/>"
+    )
+    print(f"XHTML 생성 응답: {xhtml_res}")

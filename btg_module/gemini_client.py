@@ -377,10 +377,17 @@ class GeminiClient:
         if not self.client:
             # 클라이언트가 초기화되지 않은 경우, 여기서 API 키 회전을 시도하는 것은 의미가 없을 수 있음.
             # 초기화 실패는 더 근본적인 문제일 가능성이 높음.
-             raise GeminiApiException("Gemini 클라이언트가 초기화되지 않았습니다.")
+            logger.error("generate_text 호출 시 Gemini 클라이언트가 초기화되지 않았습니다.")
+            raise GeminiApiException("Gemini 클라이언트가 초기화되지 않았습니다.")
         if not model_name:
             raise ValueError("모델 이름이 제공되지 않았습니다.")
-        
+
+        # generation_config_dict에서 response_mime_type과 response_schema 추출
+        # current_generation_config_params는 온도, top_p 등 기본 설정을 포함할 수 있음
+        current_generation_config_params = generation_config_dict.copy() if generation_config_dict else {}
+        response_mime_type_from_config = current_generation_config_params.pop("response_mime_type", None)
+        current_generation_config_params.pop("response_schema", None) # response_schema는 GeminiClient에서 직접 사용 안 함 (프롬프트 구성용)
+
         # API 키 모드이고, 현재 키가 설정되어 있으며, 환경 변수 GOOGLE_API_KEY가 없는 경우에만 모델 이름에 키 추가
         # 환경 변수가 설정되어 있다면 Client가 이를 사용할 것으로 기대.
         is_api_key_mode_for_norm = self.auth_mode == "API_KEY" and bool(self.current_api_key) and not os.environ.get("GOOGLE_API_KEY")
@@ -403,6 +410,12 @@ class GeminiClient:
         attempted_keys_count = 0
 
         while attempted_keys_count < total_keys:
+            # GenerationConfig 객체 생성
+            # response_mime_type은 여기서 설정
+            final_gen_config_params_for_sdk = current_generation_config_params.copy()
+            if response_mime_type_from_config:
+                final_gen_config_params_for_sdk["response_mime_type"] = response_mime_type_from_config
+
             current_retry_for_this_key = 0
             current_backoff = initial_backoff
             
@@ -426,12 +439,12 @@ class GeminiClient:
                     text_content_from_api: Optional[str] = None
                     if stream:
                         response = self.client.models.generate_content_stream(
-                            model=effective_model_name,
-                            contents=final_contents,
-                            config=genai_types.GenerateContentConfig(
-                                **generation_config_dict
-                            ) if generation_config_dict else None
+                            model=effective_model_name, # type: ignore
+                            contents=final_contents, # type: ignore
+                            generation_config=genai_types.GenerationConfig(**final_gen_config_params_for_sdk) if final_gen_config_params_for_sdk else None # type: ignore
                         )
+                        # 스트리밍 응답에서 JSON을 올바르게 처리하려면 추가 로직이 필요할 수 있음
+                        # 여기서는 단순 텍스트 결합으로 가정
                         aggregated_parts = []
                         for chunk_response in response:
                             if self._is_content_safety_error(response=chunk_response):
@@ -447,12 +460,11 @@ class GeminiClient:
                         text_content_from_api = "".join(aggregated_parts)
                     else:
                         response = self.client.models.generate_content(
-                            model=effective_model_name,
-                            contents=final_contents,
-                            config=genai_types.GenerateContentConfig(
-                                **generation_config_dict
-                            ) if generation_config_dict else None
+                            model=effective_model_name, # type: ignore
+                            contents=final_contents, # type: ignore
+                            generation_config=genai_types.GenerationConfig(**final_gen_config_params_for_sdk) if final_gen_config_params_for_sdk else None # type: ignore
                         )
+
                         if self._is_content_safety_error(response=response):
                             raise GeminiContentSafetyException("콘텐츠 안전 문제로 응답 차단")
                         if hasattr(response, 'text') and response.text is not None:
@@ -486,15 +498,14 @@ class GeminiClient:
                     
                     raise GeminiApiException("모델로부터 유효한 텍스트 응답을 받지 못했습니다.")
 
-                except GeminiContentSafetyException:
-                # 콘텐츠 안전 예외는 즉시 상위로 전파
+                except GeminiContentSafetyException: # 콘텐츠 안전 예외는 즉시 상위로 전파
                     raise
                 except GoogleAuthError as auth_e:
                     logger.warning(f"인증 오류 발생: {auth_e}")
                     if self._is_invalid_request_error(auth_e):
                         logger.error(f"복구 불가능한 인증 오류: {auth_e}")
                         if self.auth_mode == "API_KEY":
-                            break
+                            break # 현재 키에 대한 재시도 중단, 다음 키로
                         else:
                             raise GeminiInvalidRequestException(f"복구 불가능한 인증 오류: {auth_e}") from auth_e
                     # 인증 오류도 재시도 로직 적용
@@ -503,7 +514,7 @@ class GeminiClient:
                         current_retry_for_this_key += 1
                         current_backoff = min(current_backoff * 2, max_backoff)
                         continue
-                    else:
+                    else: # 현재 키에 대한 최대 재시도 도달
                         break
                 except Exception as e:
                     error_message = str(e)
@@ -512,7 +523,7 @@ class GeminiClient:
                     if self._is_invalid_request_error(e):
                         logger.error(f"복구 불가능한 요청 오류 (현재 키/설정): {error_message}")
                         if self.auth_mode == "API_KEY":
-                            break
+                            break # 현재 키에 대한 재시도 중단, 다음 키로
                         else:
                             raise GeminiInvalidRequestException(f"복구 불가능한 요청 오류: {error_message}") from e
                     elif self._is_rate_limit_error(e):
@@ -522,14 +533,14 @@ class GeminiClient:
                             current_retry_for_this_key += 1
                             current_backoff = min(current_backoff * 2, max_backoff)
                             continue
-                        else:
+                        else: # 현재 키에 대한 최대 재시도 도달
                             break
                     else:
                         if current_retry_for_this_key < max_retries:
                             time.sleep(current_backoff + random.uniform(0,1))
                             current_retry_for_this_key += 1
                             current_backoff = min(current_backoff * 2, max_backoff)
-                            continue
+                            continue # 현재 키로 재시도
                         else:
                             break
             
