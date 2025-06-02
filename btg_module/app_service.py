@@ -65,7 +65,13 @@ class AppService:
 
     def __init__(self, config_file_path: Optional[Union[str, Path]] = None):
         self.config_manager = ConfigManager(config_file_path)
-        self.config: Dict[str, Any] = {}
+        # 초기 config 로드는 생성자에서 한 번만 수행
+        try:
+            self.config: Dict[str, Any] = self.config_manager.load_config()
+        except Exception as e:
+            logger.error(f"초기 설정 로드 실패: {e}. 기본 설정 사용.")
+            self.config: Dict[str, Any] = self.config_manager.get_default_config()
+        
         self.gemini_client: Optional[GeminiClient] = None
         self.translation_service: Optional[TranslationService] = None
         self.lorebook_service: Optional[LorebookService] = None # Renamed from pronoun_service
@@ -78,25 +84,24 @@ class AppService:
         self.processed_chunks_count = 0
         self.successful_chunks_count = 0
         self.failed_chunks_count = 0
+        
+        self._initialize_services_from_config() # config 기반 서비스 초기화 로직 호출
 
-        self.load_app_config()
-
-    def load_app_config(self) -> Dict[str, Any]:
-        logger.info("애플리케이션 설정 로드 중...")
+    def _initialize_services_from_config(self):
+        # 이전에 load_app_config에 있던 GeminiClient, TranslationService, LorebookService 초기화 로직
+        # self.config 딕셔너리를 직접 사용
+        logger.info("AppService 내부 서비스 초기화 중 (config 기반)...")
         try:
-            self.config = self.config_manager.load_config()
-            logger.info("애플리케이션 설정 로드 완료.")
-
             auth_credentials_for_gemini_client: Optional[Union[str, List[str], Dict[str, Any]]] = None
             use_vertex = self.config.get("use_vertex_ai", False)
             gcp_project_from_config = self.config.get("gcp_project")
             gcp_location = self.config.get("gcp_location")
             sa_file_path_str = self.config.get("service_account_file_path")
 
-            logger.debug(f"[AppService.load_app_config] Vertex AI 사용 여부 (use_vertex): {use_vertex}")
-            logger.debug(f"[AppService.load_app_config] 설정 파일 내 GCP 프로젝트 (gcp_project_from_config): '{gcp_project_from_config}'")
-            logger.debug(f"[AppService.load_app_config] 설정 파일 내 GCP 위치 (gcp_location): '{gcp_location}'")
-            logger.debug(f"[AppService.load_app_config] 서비스 계정 파일 경로 (sa_file_path_str): '{sa_file_path_str}'")
+            logger.debug(f"[AppService._initialize_services_from_config] Vertex AI 사용 여부 (use_vertex): {use_vertex}")
+            logger.debug(f"[AppService._initialize_services_from_config] 설정 파일 내 GCP 프로젝트 (gcp_project_from_config): '{gcp_project_from_config}'")
+            logger.debug(f"[AppService._initialize_services_from_config] 설정 파일 내 GCP 위치 (gcp_location): '{gcp_location}'")
+            logger.debug(f"[AppService._initialize_services_from_config] 서비스 계정 파일 경로 (sa_file_path_str): '{sa_file_path_str}'")
 
             if use_vertex:
                 logger.info("Vertex AI 사용 모드로 설정되었습니다.")
@@ -109,7 +114,7 @@ class AppService:
                             logger.info(f"Vertex AI 서비스 계정 파일 ('{sa_file_path}')에서 인증 정보를 로드했습니다.")
                         except Exception as e:
                             logger.error(f"Vertex AI 서비스 계정 파일 읽기 실패 ({sa_file_path}): {e}")
-                            auth_credentials_for_gemini_client = None
+                            auth_credentials_for_gemini_client = None # ADC 또는 오류
                     else:
                         logger.warning(f"Vertex AI 서비스 계정 파일 경로가 유효하지 않거나 파일이 아닙니다: {sa_file_path_str}")
                         # sa_file_path_str이 제공되었지만 유효하지 않은 경우, auth_credentials를 확인합니다.
@@ -178,15 +183,14 @@ class AppService:
                 should_initialize_client = True
                 logger.info("Vertex AI 사용 및 프로젝트 ID 존재 (설정 또는 환경변수)로 클라이언트 초기화 조건 충족 (인증정보는 ADC 기대).")
 
-
-            logger.debug(f"[AppService.load_app_config] GeminiClient 초기화 전: should_initialize_client={should_initialize_client}")
-            logger.debug(f"[AppService.load_app_config] auth_credentials_for_gemini_client 타입: {type(auth_credentials_for_gemini_client)}")
+            logger.debug(f"[AppService._initialize_services_from_config] GeminiClient 초기화 전: should_initialize_client={should_initialize_client}")
+            logger.debug(f"[AppService._initialize_services_from_config] auth_credentials_for_gemini_client 타입: {type(auth_credentials_for_gemini_client)}")
             if isinstance(auth_credentials_for_gemini_client, str) and len(auth_credentials_for_gemini_client) > 200:
-                 logger.debug(f"[AppService.load_app_config] auth_credentials_for_gemini_client (일부): {auth_credentials_for_gemini_client[:100]}...{auth_credentials_for_gemini_client[-100:]}")
+                 logger.debug(f"[AppService._initialize_services_from_config] auth_credentials_for_gemini_client (일부): {auth_credentials_for_gemini_client[:100]}...{auth_credentials_for_gemini_client[-100:]}")
             elif isinstance(auth_credentials_for_gemini_client, dict):
-                 logger.debug(f"[AppService.load_app_config] auth_credentials_for_gemini_client (키 목록): {list(auth_credentials_for_gemini_client.keys())}")
+                 logger.debug(f"[AppService._initialize_services_from_config] auth_credentials_for_gemini_client (키 목록): {list(auth_credentials_for_gemini_client.keys())}")
             else:
-                 logger.debug(f"[AppService.load_app_config] auth_credentials_for_gemini_client: {auth_credentials_for_gemini_client}")
+                 logger.debug(f"[AppService._initialize_services_from_config] auth_credentials_for_gemini_client: {auth_credentials_for_gemini_client}")
 
             if should_initialize_client:
                 try:
@@ -217,27 +221,55 @@ class AppService:
                 self.translation_service = None
                 self.lorebook_service = None # Renamed
                 logger.warning("Gemini 클라이언트가 초기화되지 않아 번역 및 고유명사 서비스가 비활성화됩니다.")
-
-            return self.config
         except FileNotFoundError as e:
-            logger.error(f"설정 파일 찾기 실패: {e}")
-            self.config = self.config_manager.get_default_config()
-            logger.warning("기본 설정으로 계속 진행합니다. Gemini 클라이언트는 초기화되지 않을 수 있습니다.")
+            logger.error(f"설정 관련 파일 찾기 실패 (_initialize_services_from_config): {e}")
+            # 이 경우, self.config는 생성자에서 로드된 값을 그대로 사용하거나 기본값을 가짐
             self.gemini_client = None
-            self.translation_service = None # Keep
-            self.lorebook_service = None # Renamed
+            self.translation_service = None
+            self.lorebook_service = None
+            logger.warning("서비스 초기화 중 파일 관련 오류로 서비스 비활성화 가능성.")
+        except Exception as e:
+            logger.error(f"서비스 초기화 중 심각한 오류 발생: {e}", exc_info=True)
+            # BtgConfigException 대신 BtgServiceException이 더 적절할 수 있음
+            raise BtgServiceException(f"서비스 초기화 오류: {e}", original_exception=e) from e
+
+    def load_app_config(self) -> Dict[str, Any]:
+        # 이 메서드는 이제 self.config를 파일에서 다시 로드하는 대신,
+        # 현재 self.config를 기반으로 서비스들을 (재)초기화하는 역할을 합니다.
+        # self.config는 외부에서 (예: GUI) 업데이트될 수 있습니다.
+        logger.info("애플리케이션 설정에 따라 서비스 (재)초기화 중 (load_app_config 호출됨)...")
+        try:
+            # self.config = self.config_manager.load_config() # 이 라인 제거 또는 조건부 실행
+            # 대신, self.config는 생성자에서 로드되거나, 외부에서 직접 업데이트될 수 있음.
+            
+            self._initialize_services_from_config() # 분리된 초기화 로직 호출
+            logger.info("서비스 (재)초기화 완료.")
+            return self.config
+        # FileNotFoundError는 _initialize_services_from_config 내부의 read_text_file 등에서 발생할 수 있음
+        except FileNotFoundError as e: 
+            logger.error(f"설정 관련 파일 찾기 실패 (load_app_config): {e}")
+            # 기본 설정으로 계속 진행하거나, 오류를 발생시킬 수 있음
+            if not self.config: # 만약 config가 비어있다면 (이론상 발생 안 함)
+                 self.config = self.config_manager.get_default_config()
+                 logger.warning("load_app_config: self.config가 비어있어 기본값으로 재설정 후 서비스 초기화 시도.")
+                 self._initialize_services_from_config()
+            # 이미 self.config가 존재하면 (예: GUI에서 업데이트된 값), 그것을 사용
             return self.config
         except Exception as e:
-            logger.error(f"설정 로드 중 심각한 오류 발생: {e}", exc_info=True)
-            raise BtgConfigException(f"설정 로드 오류: {e}", original_exception=e) from e
+            logger.error(f"서비스 (재)초기화 중 심각한 오류 발생: {e}", exc_info=True)
+            raise BtgServiceException(f"서비스 (재)초기화 오류: {e}", original_exception=e) from e
 
     def save_app_config(self, config_data: Dict[str, Any]) -> bool:
         logger.info("애플리케이션 설정 저장 중...")
         try:
-            success = self.config_manager.save_config(config_data)
+            # 먼저 파일에 저장
+            success = self.config_manager.save_config(config_data) # type: ignore
             if success:
                 logger.info("애플리케이션 설정 저장 완료.")
-                self.load_app_config()
+                # 파일 저장 후, 현재 AppService 인스턴스의 config도 업데이트
+                self.config = config_data.copy() # 외부에서 전달된 config_data로 self.config 업데이트
+                # 업데이트된 self.config를 기반으로 서비스 재초기화
+                self._initialize_services_from_config() # 파일 다시 안 읽음
             return success
         except Exception as e:
             logger.error(f"설정 저장 중 오류 발생: {e}")

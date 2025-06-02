@@ -128,7 +128,7 @@ class ScrollableFrame:
 class EbtgGui:
     def __init__(self, root_window):
         self.root = root_window
-        self.root.title("EBTG - EPUB Batch Translator with Gemini")
+        self.root.title("EBTG - EPUB 일괄 번역기 (Gemini)")
         self.root.geometry("900x750") # Adjusted size
 
         self.ebtg_app_service: EbtgAppService | None = None
@@ -143,12 +143,12 @@ class EbtgGui:
         try:
             self.ebtg_app_service = EbtgAppService() # Uses default config path
             logging.getLogger(__name__).info("EBTG App Service initialized by GUI.")
-        except Exception as e:
+        except Exception as e: # type: ignore
             # Log to console if GUI logger isn't ready
             logging.getLogger(__name__).critical(f"Failed to initialize EbtgAppService in GUI: {e}", exc_info=True)
             # Show error in a simple messagebox if root window is available
             if self.root.winfo_exists():
-                messagebox.showerror("Critical Error", f"Error initializing EBTG App Service: {e}\nGUI may not function.")
+                messagebox.showerror("치명적 오류", f"EBTG 앱 서비스 초기화 오류: {e}\nGUI가 작동하지 않을 수 있습니다.")
             # GUI setup will proceed, but start button will be disabled if service is None
 
         # --- Notebook for Tabs ---
@@ -157,7 +157,7 @@ class EbtgGui:
 
         # --- Tab 1: EPUB Translation ---
         self.epub_translation_tab = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(self.epub_translation_tab, text='EPUB 번역')
+        self.notebook.add(self.epub_translation_tab, text='EPUB 번역') # 이미 한국어
         self._create_epub_translation_widgets(self.epub_translation_tab)
 
         # --- Tab 2: Translation Settings ---
@@ -183,22 +183,22 @@ class EbtgGui:
         else:
             # Disable start button if service failed to initialize
             if hasattr(self, 'start_button'): self.start_button.config(state=tk.DISABLED)
-            logging.getLogger(__name__).error("EBTG App Service is None, settings UI might not load correctly.")
+            logging.getLogger(__name__).error("EBTG App Service가 None이므로 설정 UI가 올바르게 로드되지 않을 수 있습니다.")
 
 
     def _create_epub_translation_widgets(self, parent_frame):
         # --- File Selection Frame ---
-        file_frame = ttk.LabelFrame(parent_frame, text="File Selection", padding="10")
+        file_frame = ttk.LabelFrame(parent_frame, text="파일 선택", padding="10")
         file_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(file_frame, text="Input EPUB:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(file_frame, text="입력 EPUB:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
         self.input_epub_var = tk.StringVar()
         self.input_epub_entry = ttk.Entry(file_frame, textvariable=self.input_epub_var, width=60)
         self.input_epub_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.EW)
         self.browse_input_btn = ttk.Button(file_frame, text="Browse...", command=self.browse_input_file)
         self.browse_input_btn.grid(row=0, column=2, padx=5, pady=5)
 
-        ttk.Label(file_frame, text="Output EPUB:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(file_frame, text="출력 EPUB:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
         self.output_epub_var = tk.StringVar()
         self.output_epub_entry = ttk.Entry(file_frame, textvariable=self.output_epub_var, width=60)
         self.output_epub_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.EW)
@@ -211,10 +211,10 @@ class EbtgGui:
         controls_frame = ttk.Frame(parent_frame, padding="10")
         controls_frame.pack(fill=tk.X, pady=5)
 
-        self.start_button = ttk.Button(controls_frame, text="Start Translation", command=self.start_translation)
+        self.start_button = ttk.Button(controls_frame, text="번역 시작", command=self.start_translation)
         self.start_button.pack(side=tk.LEFT, padx=5)
         
-        self.stop_button = ttk.Button(controls_frame, text="Stop", command=self.request_stop_translation, state=tk.DISABLED)
+        self.stop_button = ttk.Button(controls_frame, text="중지", command=self.request_stop_translation, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
         
         # --- Progress Bar and Status ---
@@ -224,7 +224,7 @@ class EbtgGui:
         self.progress_bar = ttk.Progressbar(progress_status_frame, orient="horizontal", length=300, mode="determinate")
         self.progress_bar.pack(fill=tk.X, expand=True, side=tk.TOP, padx=5, pady=(0,2)) # progress_bar를 위로
         
-        self.status_var = tk.StringVar(value="Ready.")
+        self.status_var = tk.StringVar(value="준비됨.")
         status_label = ttk.Label(progress_status_frame, textvariable=self.status_var, anchor=tk.W)
         status_label.pack(side=tk.TOP, padx=5, fill=tk.X, expand=True, pady=(2,0)) # status_label을 아래로
 
@@ -240,7 +240,7 @@ class EbtgGui:
         self.api_keys_text = scrolledtext.ScrolledText(api_frame, width=58, height=3, wrap=tk.WORD)
         self.api_keys_text.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
 
-        self.use_vertex_ai_var = tk.BooleanVar()
+        self.use_vertex_ai_var = tk.BooleanVar() # type: ignore
         self.use_vertex_ai_check = ttk.Checkbutton(api_frame, text="Vertex AI 사용 (BTG Module)", variable=self.use_vertex_ai_var, command=self._toggle_vertex_fields)
         self.use_vertex_ai_check.grid(row=1, column=0, columnspan=3, padx=5, pady=2, sticky="w")
 
@@ -362,10 +362,10 @@ class EbtgGui:
 
         # 설정 저장/로드 버튼
         action_frame = ttk.Frame(settings_frame, padding="10")
-        action_frame.pack(fill="x", padx=5, pady=10)
-        self.save_settings_button = ttk.Button(action_frame, text="EBTG 설정 저장", command=self._save_ebtg_settings)
+        action_frame.pack(fill="x", padx=5, pady=10) # type: ignore
+        self.save_settings_button = ttk.Button(action_frame, text="EBTG 설정 저장", command=self._save_ebtg_settings) # type: ignore
         self.save_settings_button.pack(side="left", padx=5)
-        self.load_settings_button = ttk.Button(action_frame, text="EBTG 설정 불러오기", command=self._load_ebtg_settings_to_ui)
+        self.load_settings_button = ttk.Button(action_frame, text="EBTG 설정 불러오기", command=self._load_ebtg_settings_to_ui) # type: ignore
         self.load_settings_button.pack(side="left", padx=5)
 
         self._toggle_vertex_fields() # Initial state
@@ -498,13 +498,13 @@ class EbtgGui:
 
     def browse_input_file(self):
         filepath = filedialog.askopenfilename(
-            title="Select Input EPUB File",
+            title="입력 EPUB 파일 선택",
             filetypes=(("EPUB files", "*.epub"), ("All files", "*.*"))
         )
         if filepath:
             self.input_epub_var.set(filepath)
             p = Path(filepath)
-            suggested_output = p.parent / f"{p.stem}_translated.epub"
+            suggested_output = p.parent / f"{p.stem}_번역됨.epub"
             self.output_epub_var.set(str(suggested_output))
 
     def browse_output_path(self):
@@ -517,7 +517,7 @@ class EbtgGui:
             self.output_epub_var.set(filepath)
 
     def _browse_btg_lorebook_json_file(self):
-        filepath = filedialog.askopenfilename(title="로어북 JSON 파일 선택 (BTG)", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
+        filepath = filedialog.askopenfilename(title="로어북 JSON 파일 선택 (BTG 모듈)", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
         if filepath:
             self.btg_lorebook_json_path_entry.delete(0, tk.END)
             self.btg_lorebook_json_path_entry.insert(0, filepath)
@@ -546,7 +546,7 @@ class EbtgGui:
 
     def _update_model_list_ui(self):
         if not self.ebtg_app_service or not self.ebtg_app_service.btg_app_service:
-            messagebox.showerror("오류", "BTG AppService가 초기화되지 않았습니다.")
+            messagebox.showerror("오류", "BTG AppService가 초기화되지 않았습니다.") # 이미 한국어
             return
 
         current_user_input_model = self.model_name_combobox.get()
@@ -559,7 +559,7 @@ class EbtgGui:
                 self.ebtg_app_service.btg_app_service.config.update(btg_config_part)
                 self.ebtg_app_service.btg_app_service.load_app_config() # This re-initializes gemini_client
                 if not self.ebtg_app_service.btg_app_service.gemini_client:
-                    messagebox.showwarning("인증 필요", "BTG API 클라이언트 초기화 실패. API 키 또는 Vertex AI 설정을 확인하세요.")
+                    messagebox.showwarning("인증 필요", "BTG API 클라이언트 초기화 실패. API 키 또는 Vertex AI 설정을 확인하세요.") # 이미 한국어
                     return
 
             models_data: list[ModelInfoDTO] = self.ebtg_app_service.btg_app_service.get_available_models() # type: ignore
@@ -585,9 +585,9 @@ class EbtgGui:
                 self.model_name_combobox.set("")
             logging.getLogger(__name__).info(f"{len(model_display_names)}개 BTG 모델 로드 완료.")
         except (BtgApiClientException, BtgServiceException) as e:
-            messagebox.showerror("API 오류", f"BTG 모델 목록 조회 실패: {e}")
-        except Exception as e:
-            messagebox.showerror("오류", f"BTG 모델 목록 조회 중 예상치 못한 오류: {e}")
+            messagebox.showerror("API 오류", f"BTG 모델 목록 조회 실패: {e}") # 이미 한국어
+        except Exception as e: # type: ignore
+            messagebox.showerror("오류", f"BTG 모델 목록 조회 중 예상치 못한 오류: {e}") # 이미 한국어
             logging.getLogger(__name__).error(f"BTG 모델 목록 조회 중 오류: {e}", exc_info=True)
 
     def _get_ebtg_config_from_ui(self) -> dict:
@@ -603,7 +603,7 @@ class EbtgGui:
             config_data["content_segmentation_max_items"] = int(self.ebtg_segment_max_items_entry.get() or "0")
         except ValueError:
             config_data["content_segmentation_max_items"] = 0
-            messagebox.showwarning("입력 오류", "EBTG XHTML 분할 최대 아이템 수는 숫자여야 합니다. 기본값(0)으로 설정됩니다.")
+            messagebox.showwarning("입력 오류", "EBTG XHTML 분할 최대 아이템 수는 숫자여야 합니다. 기본값(0)으로 설정됩니다.") # 이미 한국어
         
         # BTG module related settings (to be stored in ebtg_config.json, under a sub-key or flattened)
         # For simplicity, we'll flatten them for now, but a sub-key like "btg_settings" might be cleaner.
@@ -685,10 +685,10 @@ class EbtgGui:
             self.ebtg_app_service.btg_app_service.config.update(self._get_btg_config_from_ui())
             self.ebtg_app_service.btg_app_service.load_app_config() # Re-init BTG client if auth changed
 
-            messagebox.showinfo("성공", "EBTG 설정이 성공적으로 저장되었습니다.")
+            messagebox.showinfo("성공", "EBTG 설정이 성공적으로 저장되었습니다.") # 이미 한국어
             logging.getLogger(__name__).info("EBTG 설정 저장됨.")
-        except Exception as e:
-            messagebox.showerror("오류", f"EBTG 설정 저장 중 예상치 못한 오류: {e}")
+        except Exception as e: # type: ignore
+            messagebox.showerror("오류", f"EBTG 설정 저장 중 예상치 못한 오류: {e}") # 이미 한국어
             logging.getLogger(__name__).error(f"EBTG 설정 저장 중 오류: {e}", exc_info=True)
 
     def _load_ebtg_settings_to_ui(self):
@@ -787,7 +787,7 @@ class EbtgGui:
         try:
             if not self.ebtg_app_service:
                 logging.getLogger(__name__).error("EBTG App Service not available for translation.")
-                self.status_var.set("Error: Service not ready.")
+                self.status_var.set("오류: 서비스가 준비되지 않았습니다.")
                 return
 
             # Ensure latest settings from UI are applied to app_service.config
@@ -808,7 +808,7 @@ class EbtgGui:
             # progress_dto는 EpubProcessingProgressDTO 타입
             # _update_epub_translation_progress 메서드가 콜백으로 사용됨
 
-            self.status_var.set(f"Processing: {Path(input_path).name}...")
+            self.status_var.set(f"처리 중: {Path(input_path).name}...")
             logging.getLogger(__name__).info(f"Starting translation via GUI: {input_path} -> {output_path}")
             
             # The core translation call, passing the GUI update callback
@@ -818,40 +818,40 @@ class EbtgGui:
 
             if self._stop_event.is_set(): # Check if stop was requested
                 logging.getLogger(__name__).info("Translation process was requested to stop.")
-                self.status_var.set("Translation stopped by user.")
+                self.status_var.set("사용자에 의해 번역이 중지되었습니다.")
             else:
                 logging.getLogger(__name__).info("Translation completed successfully.")
-                self.status_var.set("Translation complete!")
+                self.status_var.set("번역 완료!")
         except EbtgProcessingError as e:
             logging.getLogger(__name__).error(f"EBTG Processing Error: {e}", exc_info=False) # exc_info=False to avoid huge tracebacks in GUI log for known errors
-            self.status_var.set(f"Error: {e}")
-        except Exception as e:
+            self.status_var.set(f"오류: {e}")
+        except Exception as e: # type: ignore
             logging.getLogger(__name__).error(f"An unexpected error occurred during translation: {e}", exc_info=True)
-            self.status_var.set(f"Unexpected Error: Check logs.")
+            self.status_var.set(f"예상치 못한 오류: 로그를 확인하세요.")
         finally:
             if hasattr(self, 'start_button'): self.start_button.config(state=tk.NORMAL)
             if hasattr(self, 'stop_button'): self.stop_button.config(state=tk.DISABLED)
             self._stop_event.clear() 
 
     def start_translation(self):
-        input_path = self.input_epub_var.get()
-        output_path = self.output_epub_var.get()
+        input_path: str = self.input_epub_var.get()
+        output_path: str = self.output_epub_var.get()
 
-        if not input_path or not output_path:
-            self.status_var.set("Error: Input and Output paths are required.")
+        if not input_path or not output_path: # type: ignore
+            self.status_var.set("오류: 입력 및 출력 경로가 필요합니다.")
             return
         if not Path(input_path).exists():
             self.status_var.set(f"Error: Input file not found: {input_path}")
             return
 
         if self.translation_thread and self.translation_thread.is_alive():
-            self.status_var.set("Error: A translation is already in progress.")
+            self.status_var.set("오류: 이미 번역이 진행 중입니다.")
             logging.getLogger(__name__).warning("GUI: Start pressed while a translation is ongoing.")
             return
 
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
-        self.status_var.set("Starting translation...")
+        self.status_var.set("번역 시작 중...")
         
         # --- EbtgAppService.translate_epub에 콜백 전달 ---
         # EbtgAppService.translate_epub이 progress_callback 인자를 받도록 수정되었다고 가정
@@ -872,13 +872,13 @@ class EbtgGui:
     def request_stop_translation(self):
         if self.translation_thread and self.translation_thread.is_alive():
             logging.getLogger(__name__).info("Stop requested by user.")
-            self.status_var.set("Stop requested... (will stop after current file/segment if possible)")
+            self.status_var.set("중지 요청됨... (가능한 경우 현재 파일/세그먼트 이후 중지)")
             self._stop_event.set() 
             # Stop button will be re-enabled/disabled in _translation_task_runner finally block
             # For immediate feedback, disable it here too.
             self.stop_button.config(state=tk.DISABLED)
         else:
-            self.status_var.set("No active translation to stop.")
+            self.status_var.set("중지할 활성 번역 작업이 없습니다.")
             self.stop_button.config(state=tk.DISABLED)
             self.start_button.config(state=tk.NORMAL)
 
@@ -904,7 +904,7 @@ class EbtgGui:
 
         status_msg = f"{progress_dto.status_message} "
         if progress_dto.current_file_name: status_msg += f"({progress_dto.current_file_name}) "
-        status_msg += f"{progress_dto.processed_files}/{progress_dto.total_files} files"
+        status_msg += f"{progress_dto.processed_files}/{progress_dto.total_files} 파일"
         if progress_dto.errors_count > 0: status_msg += f", Errors: {progress_dto.errors_count}"
         self.status_var.set(status_msg)
 
@@ -918,15 +918,15 @@ class EbtgGui:
 
     def _extract_lorebook_from_epub_thread(self):
         if not self.ebtg_app_service or not self.ebtg_app_service.btg_app_service:
-            messagebox.showerror("오류", "BTG AppService가 초기화되지 않았습니다.")
+            messagebox.showerror("오류", "BTG AppService가 초기화되지 않았습니다.") # 이미 한국어
             return
 
         input_epub_path = self.input_epub_var.get()
         if not input_epub_path:
-            messagebox.showwarning("경고", "로어북을 추출할 EPUB 파일을 먼저 선택해주세요.")
+            messagebox.showwarning("경고", "로어북을 추출할 EPUB 파일을 먼저 선택해주세요.") # 이미 한국어
             return
         if not Path(input_epub_path).exists():
-            messagebox.showerror("오류", f"EPUB 파일을 찾을 수 없습니다: {input_epub_path}")
+            messagebox.showerror("오류", f"EPUB 파일을 찾을 수 없습니다: {input_epub_path}") # 이미 한국어
             return
 
         try:
@@ -937,10 +937,10 @@ class EbtgGui:
             self.ebtg_app_service.btg_app_service.load_app_config() # Re-init client if needed
 
             if not self.ebtg_app_service.btg_app_service.gemini_client:
-                if not messagebox.askyesno("API 설정 경고", "BTG API 클라이언트가 초기화되지 않았습니다. 계속 진행하시겠습니까?"):
+                if not messagebox.askyesno("API 설정 경고", "BTG API 클라이언트가 초기화되지 않았습니다. 계속 진행하시겠습니까?"): # 이미 한국어
                     return
-        except Exception as e:
-            messagebox.showerror("오류", f"로어북 추출 시작 전 BTG 설정 오류: {e}")
+        except Exception as e: # type: ignore
+            messagebox.showerror("오류", f"로어북 추출 시작 전 BTG 설정 오류: {e}") # 이미 한국어
             logging.getLogger(__name__).error(f"로어북 추출 전 BTG 설정 오류: {e}", exc_info=True)
             return
 
@@ -955,13 +955,13 @@ class EbtgGui:
                 
                 epub_full_text = self.ebtg_app_service.get_all_text_from_epub(input_epub_path)
                 if epub_full_text is None: # Handle case where text extraction might fail or return None
-                    self.root.after(0, lambda: messagebox.showerror("오류", "EPUB에서 텍스트를 추출하지 못했습니다."))
+                    self.root.after(0, lambda: messagebox.showerror("오류", "EPUB에서 텍스트를 추출하지 못했습니다.")) # 이미 한국어
                     self.root.after(0, lambda: self.btg_lorebook_progress_label.config(text="EPUB 텍스트 추출 실패"))
                     return
 
                 if not epub_full_text.strip():
-                    self.root.after(0, lambda: messagebox.showinfo("정보", "EPUB에서 추출할 텍스트 내용이 없습니다."))
-                    self.root.after(0, lambda: self.btg_lorebook_progress_label.config(text="추출할 텍스트 없음"))
+                    self.root.after(0, lambda: messagebox.showinfo("정보", "EPUB에서 추출할 텍스트 내용이 없습니다.")) # 이미 한국어
+                    self.root.after(0, lambda: self.btg_lorebook_progress_label.config(text="추출할 텍스트 없음")) # 이미 한국어
                     return
 
                 # novel_language_code from BTG settings UI
@@ -974,7 +974,7 @@ class EbtgGui:
                     novel_language_code=novel_lang_for_extraction,
                     seed_lorebook_path=self.btg_lorebook_json_path_entry.get() or None # Use seed if specified
                 )
-                self.root.after(0, lambda: messagebox.showinfo("성공", f"로어북 추출 완료!\n결과 파일: {result_json_path}"))
+                self.root.after(0, lambda: messagebox.showinfo("성공", f"로어북 추출 완료!\n결과 파일: {result_json_path}")) # 이미 한국어
                 self.root.after(0, lambda: self.btg_lorebook_progress_label.config(text=f"추출 완료: {result_json_path.name}"))
                 self.root.after(0, lambda: self.btg_lorebook_json_path_entry.insert(0, str(result_json_path))) # Update path entry
                 if result_json_path and result_json_path.exists():
@@ -982,12 +982,12 @@ class EbtgGui:
                         self.root.after(0, lambda: self._display_btg_lorebook_content(f_res.read()))
             except (BtgFileHandlerException, BtgApiClientException, BtgServiceException, BtgBusinessLogicException) as e_btg:
                 logging.getLogger(__name__).error(f"로어북 추출 중 BTG 예외: {e_btg}", exc_info=True)
-                self.root.after(0, lambda: messagebox.showerror("추출 오류", f"로어북 추출 중 오류: {e_btg}"))
-            except Exception as e_unknown:
+                self.root.after(0, lambda: messagebox.showerror("추출 오류", f"로어북 추출 중 오류: {e_btg}")) # 이미 한국어
+            except Exception as e_unknown: # type: ignore
                 logging.getLogger(__name__).error(f"로어북 추출 중 알 수 없는 예외: {e_unknown}", exc_info=True)
-                self.root.after(0, lambda: messagebox.showerror("알 수 없는 오류", f"로어북 추출 중 예상치 못한 오류: {e_unknown}"))
+                self.root.after(0, lambda: messagebox.showerror("알 수 없는 오류", f"로어북 추출 중 예상치 못한 오류: {e_unknown}")) # 이미 한국어
             finally:
-                logging.getLogger(__name__).info("로어북 추출 스레드 종료.")
+                logging.getLogger(__name__).info("로어북 추출 스레드 종료.") # 이미 한국어
 
         thread = threading.Thread(target=_extraction_task_wrapper, daemon=True)
         thread.start()
@@ -999,7 +999,7 @@ class EbtgGui:
         self.btg_lorebook_display_text.config(state=tk.DISABLED)
 
     def _load_btg_lorebook_to_display(self):
-        filepath = filedialog.askopenfilename(title="로어북 JSON 파일 선택", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
+        filepath = filedialog.askopenfilename(title="로어북 JSON 파일 선택", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*"))) # 이미 한국어
         if filepath:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
@@ -1008,31 +1008,31 @@ class EbtgGui:
                 self.btg_lorebook_json_path_entry.delete(0, tk.END)
                 self.btg_lorebook_json_path_entry.insert(0, filepath)
                 logging.getLogger(__name__).info(f"BTG 로어북 파일 로드됨: {filepath}")
-            except Exception as e:
-                messagebox.showerror("오류", f"로어북 파일 로드 실패: {e}")
+            except Exception as e: # type: ignore
+                messagebox.showerror("오류", f"로어북 파일 로드 실패: {e}") # 이미 한국어
 
     def _copy_btg_lorebook_json(self):
         content = self.btg_lorebook_display_text.get('1.0', tk.END).strip()
         if content:
             self.root.clipboard_clear()
             self.root.clipboard_append(content)
-            messagebox.showinfo("성공", "로어북 JSON 내용이 클립보드에 복사되었습니다.")
+            messagebox.showinfo("성공", "로어북 JSON 내용이 클립보드에 복사되었습니다.") # 이미 한국어
         else:
-            messagebox.showwarning("경고", "복사할 내용이 없습니다.")
+            messagebox.showwarning("경고", "복사할 내용이 없습니다.") # 이미 한국어
 
     def _save_displayed_btg_lorebook_json(self):
         content = self.btg_lorebook_display_text.get('1.0', tk.END).strip()
         if not content:
-            messagebox.showwarning("경고", "저장할 내용이 없습니다.")
+            messagebox.showwarning("경고", "저장할 내용이 없습니다.") # 이미 한국어
             return
-        filepath = filedialog.asksaveasfilename(title="로어북 JSON으로 저장", defaultextension=".json", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
+        filepath = filedialog.asksaveasfilename(title="로어북 JSON으로 저장", defaultextension=".json", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*"))) # 이미 한국어
         if filepath:
             try:
                 with open(filepath, 'w', encoding='utf-8') as f:
                     f.write(content)
-                messagebox.showinfo("성공", f"로어북이 성공적으로 저장되었습니다: {filepath}")
-            except Exception as e:
-                messagebox.showerror("오류", f"로어북 저장 실패: {e}")
+                messagebox.showinfo("성공", f"로어북이 성공적으로 저장되었습니다: {filepath}") # 이미 한국어
+            except Exception as e: # type: ignore
+                messagebox.showerror("오류", f"로어북 저장 실패: {e}") # 이미 한국어
 
 
 if __name__ == '__main__':
