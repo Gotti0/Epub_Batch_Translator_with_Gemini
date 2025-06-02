@@ -926,9 +926,14 @@ The response should be a single JSON object containing the key "translated_xhtml
                 fragment_xhtml = self.translation_service.generate_xhtml_from_content_items(fragment_prompt_instr, current_batch_items, request_dto.target_language, request_dto.response_schema_for_gemini)
                 all_xhtml_fragments.append(fragment_xhtml)
 
-            final_body_content = "\n".join(all_xhtml_fragments)
+            # Filter out empty or whitespace-only fragments and strip valid ones
+            # to ensure a cleaner concatenation.
+            valid_fragments = [f.strip() for f in all_xhtml_fragments if f and f.strip()]
+            final_body_content = "\n".join(valid_fragments)
+            
             complete_xhtml = self._wrap_body_content_with_full_xhtml_structure(final_body_content, request_dto.id_prefix, request_dto.target_language)
-            logger.info(f"Successfully generated and batched XHTML for {request_dto.id_prefix} from {len(all_xhtml_fragments)} fragments.")
+            logger.info(f"Successfully generated and batched XHTML for {request_dto.id_prefix} from {len(all_xhtml_fragments)} original fragments, "
+                        f"resulting in {len(valid_fragments)} non-empty fragments being combined.")
             return XhtmlGenerationResponseDTO(id_prefix=request_dto.id_prefix, generated_xhtml_string=complete_xhtml)
 
 if __name__ == '__main__':

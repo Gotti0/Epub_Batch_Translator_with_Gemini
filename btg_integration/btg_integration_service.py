@@ -60,7 +60,46 @@ class BtgIntegrationService:
             "Maintain the original flow and separation of dialogue from narrative text."
         )
 
-        enhanced_prompt_instructions = f"{base_prompt_instructions}\n\n{img_pos_instruction}\n\n{block_structure_instruction}\n\n{novel_style_instruction}"
+        # --- Phase 3: Advanced Prompt Engineering ---
+        # 1. 소설 특화 프롬프트 (대화문, 지문, 특정 문체 등)
+        novel_specific_prompt_details = (
+            "Novel-Specific Formatting Details:\n"
+            "- Dialogue Handling: As previously mentioned, ensure each spoken line is in its own <p> tag. "
+            "If speaker attributions (e.g., 'he said', 'Alice whispered') are present, integrate them naturally "
+            "with the dialogue, typically within the same paragraph or an immediately adjacent one if it reflects the narrative structure.\n"
+            "  Example Input: {\"type\": \"text\", \"data\": \"\\\"Stop!\\\" he cried.\"}\n"
+            "  Desired XHTML: <p>“Stop!” he cried.</p>\n"
+            "- Narration and Description: All narrative blocks, character thoughts, and descriptive passages must also be wrapped in <p> tags. "
+            "Maintain clear distinctions between dialogue and narration. Paragraph breaks implied by the sequence of 'content_items' "
+            "often signify shifts in time, scene, or focus and should be respected with new <p> tags.\n"
+            "- Literary Styles: While direct style tag generation (e.g., <i>, <b>) is not the primary goal, if the input text "
+            "implies emphasis, thoughts (often italicized), or sound effects (often bolded), the translated text should convey this intent. "
+            "The LLM should focus on semantic representation rather than literal tag reproduction unless explicitly part of a more advanced schema (not used here)."
+        )
+
+        # 2. "Few-shot" 프롬프팅 실험 (플레이스홀더 및 설명)
+        few_shot_examples_placeholder_instruction = (
+            "Illustrative Few-Shot Examples (Guidance for LLM - Actual examples would be injected here if used):\n"
+            "To further clarify the desired output structure, consider these hypothetical examples:\n"
+            "Example 1 (Text Only):\n"
+            "  Input Content Item: {\"type\": \"text\", \"data\": \"The old house stood on a hill.\"}\n"
+            "  Expected XHTML Output Fragment: <p>The old house stood on a hill.</p>\n"
+            "Example 2 (Text and Image):\n"
+            "  Input Content Items: [{\"type\": \"text\", \"data\": \"A path led to the door.\"}, {\"type\": \"image\", \"data\": {\"src\": \"door.jpg\", \"alt\": \"An old wooden door\"}}]\n"
+            "  Expected XHTML Output Fragment: <p>A path led to the door.</p><img src=\"door.jpg\" alt=\"An old wooden door\"/>\n"
+            "(End of illustrative few-shot example section. The actual 'content_items' follow the main instructions.)"
+        )
+        # --- End Phase 3 ---
+
+        enhanced_prompt_instructions = (
+            f"{base_prompt_instructions}\n\n"
+            f"{img_pos_instruction}\n\n"
+            f"{block_structure_instruction}\n\n"
+            f"{novel_style_instruction}\n\n" # This is the general novel style from Phase 2
+            f"{novel_specific_prompt_details}\n\n" # More detailed novel-specifics from Phase 3
+            f"{few_shot_examples_placeholder_instruction}" # Few-shot placeholder from Phase 3
+        )
+        
 
         request_dto = XhtmlGenerationRequestDTO(
             id_prefix=id_prefix,

@@ -55,6 +55,8 @@ class TestBtgIntegrationService(unittest.TestCase):
         self.assertIn("Image Placement:", call_args.prompt_instructions)
         self.assertIn("Basic Block Structure:", call_args.prompt_instructions)
         self.assertIn("Novel Dialogue Formatting:", call_args.prompt_instructions)
+        self.assertIn("Novel-Specific Formatting Details:", call_args.prompt_instructions) # Phase 3
+        self.assertIn("Illustrative Few-Shot Examples", call_args.prompt_instructions) # Phase 3
         
         # Check that the base prompt is at the beginning of the enhanced prompt
         self.assertTrue(call_args.prompt_instructions.startswith(test_prompt_instr))
@@ -63,6 +65,9 @@ class TestBtgIntegrationService(unittest.TestCase):
         self.assertIn("Images (represented by {'type': 'image', ...} items", call_args.prompt_instructions)
         self.assertIn("Ensure consistent use of fundamental HTML block-level tags", call_args.prompt_instructions)
         self.assertIn("For dialogue sections, if they can be identified", call_args.prompt_instructions)
+        # Phase 3 checks
+        self.assertIn("Each distinct spoken line, including those starting with quotation marks", call_args.prompt_instructions)
+        self.assertIn("Example 1 (Text Only):", call_args.prompt_instructions)
 
         self.assertIn("translated_xhtml_content", call_args.response_schema_for_gemini["properties"])
 
@@ -138,6 +143,8 @@ class TestBtgIntegrationService(unittest.TestCase):
         self.assertIn("Image Placement: Images (represented by {'type': 'image', ...} items", request_dto_arg.prompt_instructions)
         self.assertIn("Basic Block Structure: Ensure consistent use of fundamental HTML block-level tags.", request_dto_arg.prompt_instructions)
         self.assertIn("Novel Dialogue Formatting: For dialogue sections, if they can be identified", request_dto_arg.prompt_instructions)
+        self.assertIn("Novel-Specific Formatting Details:", request_dto_arg.prompt_instructions) # Phase 3
+        self.assertIn("Illustrative Few-Shot Examples", request_dto_arg.prompt_instructions) # Phase 3
 
 
 if __name__ == '__main__':
