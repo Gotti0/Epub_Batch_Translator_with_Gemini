@@ -28,25 +28,67 @@ class SimplifiedHtmlExtractor:
 
             for element in body.descendants:
                 if isinstance(element, NavigableString):
-                    text = element.string.strip()
-                    if text:
-                        current_text_parts.append(text)
+                    # .string can be None if it's a comment or special string.
+                    # Also, handle cases where element.string might not be a simple string.
+                    text_content = element.string
+                    if text_content:
+                        stripped_text = text_content.strip()
+                        if stripped_text:
+                            current_text_parts.append(stripped_text)
                 elif isinstance(element, Tag):
                     if element.name == 'img':
+                        hint_before_snippet_text = None
                         if current_text_parts:
-                            content_items.append({"type": "text", "data": " ".join(current_text_parts)})
-                            current_text_parts = []
+                            full_text_before = " ".join(current_text_parts)
+                            content_items.append({"type": "text", "data": full_text_before})
+                            # Create snippet from the text that was just added
+                            hint_before_snippet_text = (full_text_before[-50:]) if len(full_text_before) > 50 else full_text_before
+                            current_text_parts = [] # Reset for any text after this image
                         
                         src = element.get('src', '')
                         alt = element.get('alt', '')
+                        
+                        image_data_dict = {"src": src, "alt": alt}
+                        if hint_before_snippet_text:
+                            image_data_dict["context_before_snippet"] = hint_before_snippet_text
+                        
+                        # Capture hint_after_snippet
+                        after_snippet_parts_list = []
+                        temp_collected_chars_count = 0
+                        max_snippet_chars_val = 50 # Max characters for the after snippet
+                        
+                        for next_element_node in element.next_elements:
+                            if len(after_snippet_parts_list) > 3 or temp_collected_chars_count >= max_snippet_chars_val: # Limit number of parts or total characters
+                                break
+                            if isinstance(next_element_node, NavigableString):
+                                text_content_piece = next_element_node.string
+                                if text_content_piece:
+                                    stripped_text_piece = text_content_piece.strip()
+                                    if stripped_text_piece:
+                                        if temp_collected_chars_count + len(stripped_text_piece) > max_snippet_chars_val:
+                                            can_add_chars = max_snippet_chars_val - temp_collected_chars_count
+                                            after_snippet_parts_list.append(stripped_text_piece[:can_add_chars])
+                                            temp_collected_chars_count += can_add_chars
+                                            break 
+                                        else:
+                                            after_snippet_parts_list.append(stripped_text_piece)
+                                            temp_collected_chars_count += len(stripped_text_piece)
+                            elif isinstance(next_element_node, Tag):
+                                # If we hit another significant block or image, stop collecting snippet.
+                                if next_element_node.name in ['img', 'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'hr', 'table', 'ul', 'ol', 'dl']:
+                                    break 
+                        
+                        if after_snippet_parts_list:
+                            image_data_dict["context_after_snippet"] = " ".join(after_snippet_parts_list)
+
                         if src:
                             content_items.append({
                                 "type": "image",
-                                "data": {"src": src, "alt": alt}
+                                "data": image_data_dict
                             })
-                            logger.debug(f"Extracted image: src='{src}', alt='{alt}'")
+                            logger.debug(f"Extracted image: {image_data_dict}")
                         else:
-                            logger.warning("Found <img> tag with no src attribute. Skipping.")
+                            logger.warning("Found <img> tag with no src attribute. Skipping image item, but processed preceding text if any.")
                     elif element.name in ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'hr', 'table', 'ul', 'ol', 'dl']:
                         # Treat these as block-level or significant separators
                         if current_text_parts:

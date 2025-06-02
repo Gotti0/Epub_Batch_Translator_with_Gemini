@@ -30,11 +30,43 @@ class BtgIntegrationService:
             "properties": {"translated_xhtml_content": {"type": "STRING"}},
         }
         
+        # --- Prompt Enhancements (Phase 2) ---
+        base_prompt_instructions = prompt_instructions # From ebtg_config
+
+        # 1. <img> 위치 보존 강화 프롬프트
+        img_pos_instruction = (
+            "Image Placement: Images (represented by {'type': 'image', ...} items in the "
+            "'content_items' list) are critical. They MUST be placed precisely between the "
+            "text blocks where they originally appeared. The 'content_items' list preserves "
+            "this original sequence. If 'context_before_snippet' and 'context_after_snippet' "
+            "fields are present in an image's data, use them as strong hints for accurate "
+            "placement relative to the surrounding text."
+        )
+
+        # 2. 기본 블록 구조 유지 프롬프트
+        block_structure_instruction = (
+            "Basic Block Structure: Ensure consistent use of fundamental HTML block-level tags. "
+            "Primarily, use <p> tags for all paragraphs of text. If the text content clearly "
+            "suggests headings (e.g., chapter titles, section headers), use appropriate <h1> to <h6> tags. "
+            "If list structures (ordered or unordered) can be reliably inferred from the text, "
+            "use <ul><li>...</li></ul> or <ol><li>...</li></ol> tags accordingly."
+        )
+
+        # 3. (선택적) 소설의 일반적인 스타일 (대화)
+        novel_style_instruction = (
+            "Novel Dialogue Formatting: For dialogue sections, if they can be identified "
+            "(e.g., lines starting with quotation marks, em-dashes, or other common dialogue indicators), "
+            "please ensure each distinct spoken line or piece of dialogue is enclosed in its own <p> tag. "
+            "Maintain the original flow and separation of dialogue from narrative text."
+        )
+
+        enhanced_prompt_instructions = f"{base_prompt_instructions}\n\n{img_pos_instruction}\n\n{block_structure_instruction}\n\n{novel_style_instruction}"
+
         request_dto = XhtmlGenerationRequestDTO(
             id_prefix=id_prefix,
             content_items=content_items,
             target_language=target_language,
-            prompt_instructions=prompt_instructions,
+            prompt_instructions=enhanced_prompt_instructions, # Use the enhanced prompt
             response_schema_for_gemini=response_schema_for_gemini
         )
 

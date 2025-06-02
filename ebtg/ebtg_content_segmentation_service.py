@@ -26,7 +26,7 @@ class ContentSegmentationService:
         self,
         content_items: List[Dict[str, Any]],
         file_name: str, # For logging purposes
-        # max_tokens_per_segment: Optional[int] = None # Placeholder for future token-based splitting
+        max_items_per_segment: int 
     ) -> List[List[Dict[str, Any]]]:
         """
         Segments a list of content items into one or more "document fragments".
@@ -34,42 +34,26 @@ class ContentSegmentationService:
         Args:
             content_items: The list of text and image items from SimplifiedHtmlExtractor.
             file_name: The name of the XHTML file these items belong to.
-            # max_tokens_per_segment: (Future) Estimated max tokens for items in a segment.
+            max_items_per_segment: The maximum number of content items allowed in a single segment.
+                                   If 0 or negative, no segmentation by item count occurs.
 
         Returns:
             A list of segments. Each segment is a list of content_items.
-            For the initial implementation, this will always return a list containing
-            the original content_items list as its single element.
         """
-        self.logger.log_debug(f"ContentSegmentationService: Processing content items for '{file_name}'.")
+        self.logger.debug(f"ContentSegmentationService: Processing content items for '{file_name}'. Original item count: {len(content_items)}, Max items per segment: {max_items_per_segment}")
 
-        # Phase 1: No actual segmentation. Treat the whole file's content as one segment.
-        # Future enhancements could implement logic here to split `content_items`
-        # into multiple sub-lists if `max_tokens_per_segment` is provided and
-        # an estimation indicates the current list is too large.
-        #
-        # For example (pseudo-code for future):
-        # if max_tokens_per_segment:
-        #     segments = []
-        #     current_segment = []
-        #     current_tokens = 0
-        #     for item in content_items:
-        #         item_tokens = self._estimate_item_tokens(item) # Needs a helper method
-        #         if current_tokens + item_tokens > max_tokens_per_segment and current_segment:
-        #             segments.append(current_segment)
-        #             current_segment = []
-        #             current_tokens = 0
-        #         current_segment.append(item)
-        #         current_tokens += item_tokens
-        #     if current_segment:
-        #         segments.append(current_segment)
-        #     self.logger.log_info(f"Segmented content for '{file_name}' into {len(segments)} fragments based on token limits.")
-        #     return segments
+        if not content_items:
+            self.logger.info(f"ContentSegmentationService: No content items to segment for '{file_name}'.")
+            return []
 
-        self.logger.log_info(f"ContentSegmentationService: '{file_name}' content treated as a single segment (Phase 1 behavior).")
-        return [content_items]
+        if max_items_per_segment <= 0 or len(content_items) <= max_items_per_segment:
+            self.logger.info(f"ContentSegmentationService: '{file_name}' content ({len(content_items)} items) treated as a single segment (max_items_per_segment: {max_items_per_segment}).")
+            return [content_items]
 
-    # def _estimate_item_tokens(self, item: Dict[str, Any]) -> int:
-    #     # Placeholder for a method to estimate token count for a content item
-    #     # This would be model-specific or a general heuristic.
-    #     return 0
+        segments: List[List[Dict[str, Any]]] = []
+        for i in range(0, len(content_items), max_items_per_segment):
+            segment = content_items[i:i + max_items_per_segment]
+            segments.append(segment)
+        
+        self.logger.info(f"ContentSegmentationService: Segmented content for '{file_name}' into {len(segments)} fragments, each with up to {max_items_per_segment} items.")
+        return segments

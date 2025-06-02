@@ -19,7 +19,16 @@ class EbtgConfigManager:
                 "Wrap paragraphs in <p> tags. Ensure the output is a single, "
                 "well-formed XHTML string."
             ),
+            "prompt_instructions_for_xhtml_fragment_generation": (
+                "You are generating a fragment of a larger XHTML document. "
+                "The overall task is: '{overall_task_description}'. " # Placeholder for the full doc prompt
+                "Now, translate the provided text blocks and integrate the image information "
+                "to create XHTML body content. Preserve image sources and translate alt text if present. "
+                "Wrap paragraphs in <p> tags. Do NOT include html, head, or body tags. "
+                "Ensure correct relative order of items. The items are:"
+            ),
             "btg_config_path": None, # Path to btg_module's config.json, or None to use BTG's default
+            "content_segmentation_max_items": 0 # 0 or negative means no segmentation by item count
         }
 
     def load_config(self) -> Dict[str, Any]:
