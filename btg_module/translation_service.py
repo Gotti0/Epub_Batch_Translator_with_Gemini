@@ -4,6 +4,7 @@ import random
 import re
 import csv
 import json # For formatting content_items in prompt
+from pathlib import Path # Added import for Path
 from typing import Dict, Any, Optional, List, Union
 import os
 
@@ -18,7 +19,7 @@ try:
     )
     from .file_handler import read_json_file # Not directly used in new method
     from .logger_config import setup_logger
-    from .exceptions import BtgTranslationException, BtgApiClientException
+    from .exceptions import BtgTranslationException, BtgApiClientException, BtgServiceException # Added BtgServiceException
     from .chunk_service import ChunkService
     # types 모듈은 gemini_client에서 사용되므로, 여기서는 직접적인 의존성이 없을 수 있습니다.
     # 만약 이 파일 내에서 types.Part 등을 직접 사용한다면, 아래와 같이 임포트가 필요합니다.
@@ -35,7 +36,7 @@ except ImportError:
     )
     from file_handler import read_json_file
     from logger_config import setup_logger
-    from exceptions import BtgTranslationException, BtgApiClientException
+    from exceptions import BtgTranslationException, BtgApiClientException, BtgServiceException # Added BtgServiceException
     from chunk_service import ChunkService
     from dtos import LorebookEntryDTO # 로어북 DTO 임포트
     # from google.genai import types as genai_types # Fallback import
@@ -481,7 +482,7 @@ The response should be a single JSON object containing the key "translated_xhtml
         prompt_instructions: str,
         content_items: List[Dict[str, Any]],
         target_language: str,
-        response_schema: Dict[str, Any] # Schema for Gemini API's JSON output
+        response_schema: Dict[str, Any] 
     ) -> str:
         """
         Uses GeminiClient to generate a translated XHTML string from structured content items.
@@ -490,7 +491,7 @@ The response should be a single JSON object containing the key "translated_xhtml
             prompt_instructions: Detailed instructions for the LLM on how to generate XHTML.
             content_items: A list of dictionaries, where each represents a text block or an image.
             target_language: The target language for translation.
-            response_schema: The schema Gemini API should use for its JSON output.
+            response_schema: The schema Gemini API should use for its JSON output (from BtgIntegrationService).
 
         Returns:
             The generated XHTML string.
@@ -571,6 +572,16 @@ if __name__ == '__main__':
     # MockGeminiClient에서 types를 사용하므로, 이 블록 내에서 임포트합니다.
     from google.genai import types as genai_types # Ensure types is imported for hints
     
+    sample_config_base = {
+        "model_name": "gemini-1.5-flash", "temperature": 0.7, "top_p": 0.9,
+        "prompts": "다음 텍스트를 한국어로 번역해주세요. 로어북 컨텍스트: {{lorebook_context}}\n\n번역할 텍스트:\n{{slot}}",
+        "enable_dynamic_lorebook_injection": True, # 테스트를 위해 활성화
+        "lorebook_json_path": "test_lorebook.json", # 통합된 로어북 경로
+        "max_lorebook_entries_per_chunk_injection": 3,
+        "max_lorebook_chars_per_chunk_injection": 200,
+    }
+
+
     print("--- TranslationService 테스트 ---")
     class MockGeminiClient(GeminiClient):
         def __init__(self, auth_credentials, project=None, location=None, requests_per_minute: Optional[int] = None):

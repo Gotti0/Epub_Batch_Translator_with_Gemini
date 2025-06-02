@@ -384,10 +384,12 @@ class GeminiClient:
 
         # generation_config_dict에서 response_mime_type과 response_schema 추출
         # current_generation_config_params는 온도, top_p 등 기본 설정을 포함할 수 있음
-        current_generation_config_params = generation_config_dict.copy() if generation_config_dict else {}
-        response_mime_type_from_config = current_generation_config_params.pop("response_mime_type", None)
-        current_generation_config_params.pop("response_schema", None) # response_schema는 GeminiClient에서 직접 사용 안 함 (프롬프트 구성용)
-
+        effective_generation_config_params = generation_config_dict.copy() if generation_config_dict else {}
+        
+        # response_mime_type과 response_schema는 SDK의 GenerationConfig 객체에 직접 전달됩니다.
+        # 따라서 effective_generation_config_params에서 제거할 필요가 없습니다.
+        # SDK가 이 키들을 인식하여 처리합니다.
+        
         # API 키 모드이고, 현재 키가 설정되어 있으며, 환경 변수 GOOGLE_API_KEY가 없는 경우에만 모델 이름에 키 추가
         # 환경 변수가 설정되어 있다면 Client가 이를 사용할 것으로 기대.
         is_api_key_mode_for_norm = self.auth_mode == "API_KEY" and bool(self.current_api_key) and not os.environ.get("GOOGLE_API_KEY")
@@ -411,10 +413,6 @@ class GeminiClient:
 
         while attempted_keys_count < total_keys:
             # GenerationConfig 객체 생성
-            # response_mime_type은 여기서 설정
-            final_gen_config_params_for_sdk = current_generation_config_params.copy()
-            if response_mime_type_from_config:
-                final_gen_config_params_for_sdk["response_mime_type"] = response_mime_type_from_config
 
             current_retry_for_this_key = 0
             current_backoff = initial_backoff
@@ -441,7 +439,7 @@ class GeminiClient:
                         response = self.client.models.generate_content_stream(
                             model=effective_model_name, # type: ignore
                             contents=final_contents, # type: ignore
-                            generation_config=genai_types.GenerationConfig(**final_gen_config_params_for_sdk) if final_gen_config_params_for_sdk else None # type: ignore
+                            generation_config=genai_types.GenerationConfig(**effective_generation_config_params) if effective_generation_config_params else None # type: ignore
                         )
                         # 스트리밍 응답에서 JSON을 올바르게 처리하려면 추가 로직이 필요할 수 있음
                         # 여기서는 단순 텍스트 결합으로 가정
@@ -462,7 +460,7 @@ class GeminiClient:
                         response = self.client.models.generate_content(
                             model=effective_model_name, # type: ignore
                             contents=final_contents, # type: ignore
-                            generation_config=genai_types.GenerationConfig(**final_gen_config_params_for_sdk) if final_gen_config_params_for_sdk else None # type: ignore
+                            generation_config=genai_types.GenerationConfig(**effective_generation_config_params) if effective_generation_config_params else None # type: ignore
                         )
 
                         if self._is_content_safety_error(response=response):
@@ -481,7 +479,7 @@ class GeminiClient:
                     if text_content_from_api is not None:
                         # generation_config_dict가 None일 수 있으므로 확인
                         is_json_response_expected = generation_config_dict and \
-                                                    generation_config_dict.get("response_mime_type") == "application/json"
+                                                    effective_generation_config_params.get("response_mime_type") == "application/json"
 
                         if is_json_response_expected:
                             try:

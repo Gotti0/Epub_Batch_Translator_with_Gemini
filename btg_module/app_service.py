@@ -34,7 +34,7 @@ try:
     from .chunk_service import ChunkService
     from .exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException
     from .dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 임포트 확인
-    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
+    from dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
 except ImportError:
     # Fallback imports
     from file_handler import (
@@ -53,7 +53,7 @@ except ImportError:
     from chunk_service import ChunkService
     from exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException
     from dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 임포트 확인
-    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
+    from dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
 
 logger = setup_logger(__name__)
 
@@ -813,6 +813,123 @@ class AppService:
         else:
             logger.info("실행 중인 번역 작업이 없어 중지 요청을 무시합니다.")
 
+    def _estimate_prompt_char_length(
+        self,
+        prompt_instructions: str,
+        content_items_batch: List[Dict[str, Any]],
+        target_language: str
+    ) -> int:
+        """
+        Estimates the character length of the prompt that would be sent to the LLM
+        for XHTML generation, given a batch of content items.
+        This is a simplified estimation based on character counts.
+        """
+        # Base length of instructions and boilerplate.
+        # This mirrors the structure in TranslationService._construct_xhtml_generation_prompt
+        boilerplate_template = f"""
+Target language for translation of text elements: {target_language}
+
+The content items to be processed into a single XHTML string are provided below as a JSON array.
+Each object in the array has a "type" ('text' or 'image') and "data".
+For "text" type, "data" is the string to be translated.
+For "image" type, "data" is an object with "src" (to be preserved) and "alt" (to be translated if present).
+
+Content Items:
+```json
+{{content_items_json_string}}
+```
+
+Please generate the complete XHTML string based on these items and the instructions.
+The response should be a single JSON object containing the key "translated_xhtml_content" with the generated XHTML string as its value.
+"""
+        try:
+            content_items_json_string = json.dumps(content_items_batch, ensure_ascii=False)
+        except TypeError:
+            content_items_json_string = str(content_items_batch) # Fallback
+
+        total_length = (
+            len(prompt_instructions) +
+            len(boilerplate_template.replace("{{content_items_json_string}}", content_items_json_string))
+        )
+        return total_length
+
+    def _wrap_body_content_with_full_xhtml_structure(self, body_content: str, title_prefix: str, lang: str) -> str:
+        """Wraps the given body content with a standard XHTML document structure."""
+        # Ensure XML declaration is on the first line if body_content might have leading whitespace
+        body_content_cleaned = body_content.strip()
+        return f"""<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{lang}" lang="{lang}">
+<head>
+    <meta charset="utf-8"/>
+    <title>Translated {title_prefix}</title>
+</head>
+<body>
+    {body_content_cleaned}
+</body>
+</html>"""
+
+    def generate_xhtml_from_content_items(self, request_dto: XhtmlGenerationRequestDTO) -> XhtmlGenerationResponseDTO:
+        """
+        Generates an XHTML string from content items. If the content is too large,
+        it splits the items into batches, generates XHTML fragments for each,
+        and then combines them into a single XHTML document.
+        """
+        if not self.translation_service:
+            logger.error("XHTML Generation failed: TranslationService is not initialized.")
+            return XhtmlGenerationResponseDTO(id_prefix=request_dto.id_prefix, error_message="TranslationService not initialized.")
+
+        max_chars_per_batch = self.config.get("xhtml_generation_max_chars_per_batch", 100000)
+        all_xhtml_fragments: List[str] = []
+        
+        # Estimate size for all items with original prompt
+        estimated_total_chars = self._estimate_prompt_char_length(
+            request_dto.prompt_instructions, request_dto.content_items, request_dto.target_language
+        )
+
+        needs_batching = estimated_total_chars > max_chars_per_batch and len(request_dto.content_items) > 0
+
+        if not needs_batching:
+            logger.info(f"Processing {request_dto.id_prefix} as a single batch (estimated chars: {estimated_total_chars}).")
+            try:
+                generated_xhtml = self.translation_service.generate_xhtml_from_content_items(
+                    prompt_instructions=request_dto.prompt_instructions,
+                    content_items=request_dto.content_items,
+                    target_language=request_dto.target_language,
+                    response_schema=request_dto.response_schema_for_gemini
+                )
+                return XhtmlGenerationResponseDTO(id_prefix=request_dto.id_prefix, generated_xhtml_string=generated_xhtml)
+            except Exception as e:
+                logger.error(f"Error generating XHTML for {request_dto.id_prefix} (single batch): {e}", exc_info=True)
+                return XhtmlGenerationResponseDTO(id_prefix=request_dto.id_prefix, error_message=str(e))
+        else:
+            logger.info(f"Batching required for {request_dto.id_prefix} (estimated chars: {estimated_total_chars} > {max_chars_per_batch}). Splitting content items.")
+            current_batch_items: List[Dict[str, Any]] = []
+            
+            for item in request_dto.content_items:
+                temp_batch_for_estimation = current_batch_items + [item]
+                # For batching, the prompt instructions will be for fragments.
+                fragment_prompt_instr = f"Generate only the XHTML body content for the following items, ensuring correct relative order and translation to {request_dto.target_language}. Do not include html, head, or body tags. The overall task is: '{request_dto.prompt_instructions}'."
+                
+                if current_batch_items and self._estimate_prompt_char_length(fragment_prompt_instr, temp_batch_for_estimation, request_dto.target_language) > max_chars_per_batch:
+                    # Process the current_batch_items
+                    logger.debug(f"Processing batch for {request_dto.id_prefix} with {len(current_batch_items)} items.")
+                    fragment_xhtml = self.translation_service.generate_xhtml_from_content_items(fragment_prompt_instr, current_batch_items, request_dto.target_language, request_dto.response_schema_for_gemini)
+                    all_xhtml_fragments.append(fragment_xhtml)
+                    current_batch_items = [item] # Start new batch
+                else:
+                    current_batch_items.append(item)
+            
+            if current_batch_items: # Process any remaining items
+                logger.debug(f"Processing final batch for {request_dto.id_prefix} with {len(current_batch_items)} items.")
+                fragment_prompt_instr = f"Generate only the XHTML body content for the following items, ensuring correct relative order and translation to {request_dto.target_language}. Do not include html, head, or body tags. The overall task is: '{request_dto.prompt_instructions}'."
+                fragment_xhtml = self.translation_service.generate_xhtml_from_content_items(fragment_prompt_instr, current_batch_items, request_dto.target_language, request_dto.response_schema_for_gemini)
+                all_xhtml_fragments.append(fragment_xhtml)
+
+            final_body_content = "\n".join(all_xhtml_fragments)
+            complete_xhtml = self._wrap_body_content_with_full_xhtml_structure(final_body_content, request_dto.id_prefix, request_dto.target_language)
+            logger.info(f"Successfully generated and batched XHTML for {request_dto.id_prefix} from {len(all_xhtml_fragments)} fragments.")
+            return XhtmlGenerationResponseDTO(id_prefix=request_dto.id_prefix, generated_xhtml_string=complete_xhtml)
 
 if __name__ == '__main__':
     import logging

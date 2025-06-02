@@ -1,7 +1,11 @@
 # c:\Users\Hyunwoo_Room\Downloads\EBTG_Project\ebtg\ebtg_content_segmentation_service.py
 from typing import List, Dict, Any, Optional
 
-from .ebtg_logger import EbtgLogger
+# from .ebtg_logger import EbtgLogger # 이전 import 문
+from btg_module.logger_config import setup_logger # 수정된 import 문
+
+# 이 서비스 자체의 로거를 설정합니다.
+logger = setup_logger(__name__)
 
 class ContentSegmentationService:
     """
@@ -15,8 +19,8 @@ class ContentSegmentationService:
     before they are sent to BtgIntegrationService.
     """
 
-    def __init__(self, logger: EbtgLogger):
-        self.logger = logger
+    def __init__(self): # logger 인자 제거
+        self.logger = logger # 클래스 레벨에서 설정된 로거 사용 (또는 self.logger = setup_logger(__name__) 로 직접 설정)
 
     def segment_content_items(
         self,

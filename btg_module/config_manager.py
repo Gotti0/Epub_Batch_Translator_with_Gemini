@@ -123,7 +123,8 @@ class ConfigManager:
             "lorebook_output_json_filename_suffix": "_lorebook.json",
 
             # 동적 로어북 주입 설정
-            "enable_dynamic_lorebook_injection": False,
+            "enable_dynamic_lorebook_injection": False, # EBTG에서는 이 설정을 직접 사용하지 않고, TranslationService가 자체 로어북을 사용.
+            "xhtml_generation_max_chars_per_batch": 100000, # XHTML 생성 시 API 요청당 최대 프롬프트 문자 수 (근사치)
             "max_lorebook_entries_per_chunk_injection": 3,
             "max_lorebook_chars_per_chunk_injection": 500
         }
@@ -242,6 +243,7 @@ if __name__ == '__main__':
     assert config1["requests_per_minute"] == 60 # RPM 기본값 확인
     assert config1["enable_dynamic_lorebook_injection"] is False
     assert config1["max_lorebook_entries_per_chunk_injection"] == 3
+    assert config1["xhtml_generation_max_chars_per_batch"] == 100000
     assert config1["max_lorebook_chars_per_chunk_injection"] == 500
 
     print("\n--- 2. 설정 저장 테스트 (api_keys 및 max_workers 사용) ---")

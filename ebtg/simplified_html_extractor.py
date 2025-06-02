@@ -1,10 +1,11 @@
 # c:\Users\Hyunwoo_Room\Downloads\EBTG_Project\ebtg\ebtg_simplified_html_extractor.py
 from typing import List, Dict, Any
 from bs4 import BeautifulSoup, NavigableString, Tag
-
-from .ebtg_logger import EbtgLogger # Assuming EbtgLogger is in ebtg_logger.py
+# from .ebtg_logger import EbtgLogger # Assuming EbtgLogger is in ebtg_logger.py
+from btg_module.logger_config import setup_logger
 from .ebtg_exceptions import XhtmlExtractionError
 
+module_logger = setup_logger(__name__)
 class SimplifiedHtmlExtractor:
     """
     Extracts text blocks and image information sequentially from XHTML content.
@@ -17,8 +18,8 @@ class SimplifiedHtmlExtractor:
     # Text within these tags will not be collected.
     IGNORE_TAGS = {'script', 'style', 'meta', 'link', 'title', 'head', 'noscript', 'object', 'embed', 'applet', 'iframe'}
 
-    def __init__(self, logger: EbtgLogger):
-        self.logger = logger
+    def __init__(self):
+        self.logger = module_logger
 
     def _flush_text_buffer(self, text_buffer: List[str], content_items: List[Dict[str, Any]]):
         """
@@ -130,15 +131,8 @@ class SimplifiedHtmlExtractor:
 
 if __name__ == '__main__':
     # Example Usage (requires a dummy logger for testing)
-    class DummyLogger:
-        def log_debug(self, msg): print(f"DEBUG: {msg}")
-        def log_info(self, msg): print(f"INFO: {msg}")
-        def log_warning(self, msg): print(f"WARNING: {msg}")
-        def log_error(self, msg, exc_info=False): print(f"ERROR: {msg}")
-
-    logger = DummyLogger()
-    extractor = SimplifiedHtmlExtractor(logger)
-
+    # The SimplifiedHtmlExtractor now uses the module_logger configured with setup_logger
+    extractor = SimplifiedHtmlExtractor()
     sample_xhtml_1 = """
     <html>
         <head><title>Test</title></head>

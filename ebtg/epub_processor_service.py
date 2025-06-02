@@ -4,18 +4,21 @@ from ebooklib import epub
 from typing import List, Dict, Any, Optional
 
 # DTOs and Exceptions are expected to be in these locations
+from btg_module.logger_config import setup_logger
 from .ebtg_dtos import XhtmlGenerationRequest, XhtmlGenerationResponse
-from .ebtg_logger import EbtgLogger # Assuming a logger is available
+# from .ebtg_logger import EbtgLogger # Assuming a logger is available
 from .ebtg_exceptions import EbtgFileProcessingError, XhtmlExtractionError, ApiXhtmlGenerationError
+
+module_logger = setup_logger(__name__)
 
 # --- Dummy/Placeholder Implementations (to be replaced later) ---
 class SimplifiedHtmlExtractor:
     """
     (Placeholder) Extracts content items from XHTML.
-    To be implemented in its own module.
+    The actual implementation is in ebtg_simplified_html_extractor.py
     """
-    def __init__(self, logger: EbtgLogger):
-        self.logger = logger
+    def __init__(self):
+        self.logger = setup_logger(self.__class__.__name__ + ".dummy")
 
     def extract_content(self, xhtml_content: str, file_name: str) -> List[Dict[str, Any]]:
         self.logger.log_debug(f"[SIMULATED] SimplifiedHtmlExtractor: Extracting from {file_name}")
@@ -28,10 +31,10 @@ class SimplifiedHtmlExtractor:
 class BtgIntegrationService:
     """
     (Placeholder) Integrates with BTG module for XHTML generation.
-    To be implemented in its own module.
+    To be implemented in its own module (e.g., ebtg_btg_integration_service.py).
     """
-    def __init__(self, logger: EbtgLogger):
-        self.logger = logger
+    def __init__(self):
+        self.logger = setup_logger(self.__class__.__name__ + ".dummy")
 
     def generate_xhtml_via_api(self, request: XhtmlGenerationRequest) -> XhtmlGenerationResponse:
         self.logger.log_debug(f"[SIMULATED] BtgIntegrationService: Calling BTG API for {request.id_prefix} to {request.target_language}")
@@ -68,10 +71,9 @@ class BtgIntegrationService:
 # --- Main Service Implementation ---
 class EpubProcessorService:
     def __init__(self,
-                 logger: EbtgLogger,
                  html_extractor: SimplifiedHtmlExtractor,
                  btg_service: BtgIntegrationService):
-        self.logger = logger
+        self.logger = module_logger # EpubProcessorService uses the module-level logger
         self.html_extractor = html_extractor
         self.btg_service = btg_service
         self.default_prompt_instructions = (
@@ -273,4 +275,3 @@ class EpubProcessorService:
             self.logger.log_info(f"Successfully created translated EPUB: {output_epub_path}")
         except Exception as e:
             raise EbtgFileProcessingError(f"Failed to write EPUB file {output_epub_path}", original_exception=e)
-
