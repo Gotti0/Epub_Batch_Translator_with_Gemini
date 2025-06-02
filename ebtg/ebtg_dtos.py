@@ -83,6 +83,17 @@ class XhtmlGenerationResponse:
     generated_xhtml_string: Optional[str] = None
     errors: Optional[str] = None # API 생성 실패 또는 기타 오류 메시지
 
+@dataclass
+class EpubProcessingProgressDTO:
+    """
+    EPUB 처리 진행 상황을 GUI에 전달하기 위한 DTO입니다.
+    """
+    total_files: int
+    processed_files: int
+    current_file_name: Optional[str] = None
+    errors_count: int = 0
+    status_message: str = ""
+
 
 
 
