@@ -1,5 +1,6 @@
 # ebtg/ebtg_app_service.py
 
+import xml.etree.ElementTree as ET
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -9,6 +10,7 @@ from .epub_processor_service import EpubProcessorService, EpubXhtmlItem # Assumi
 from .simplified_html_extractor import SimplifiedHtmlExtractor # type: ignore
 from .ebtg_content_segmentation_service import ContentSegmentationService
 from btg_integration.btg_integration_service import BtgIntegrationService # Corrected import
+from common.progress_persistence_service import ProgressPersistenceService
 from .ebtg_exceptions import EbtgProcessingError, XhtmlExtractionError, ApiXhtmlGenerationError
 from .config_manager import EbtgConfigManager # Assuming a config manager for EBTG
 
@@ -35,6 +37,7 @@ class EbtgAppService:
         self.epub_processor = EpubProcessorService()
         self.html_extractor = SimplifiedHtmlExtractor()
         self.content_segmenter = ContentSegmentationService()
+        self.progress_service = ProgressPersistenceService()
         self.btg_integration = BtgIntegrationService(
             btg_app_service=self.btg_app_service, 
             ebtg_config=self.config
@@ -59,6 +62,18 @@ class EbtgAppService:
 </body>
 </html>"""
 
+    def _is_well_formed_xml(self, xhtml_string: str) -> bool:
+        """Checks if the given string is well-formed XML."""
+        if not xhtml_string:
+            return False
+        try:
+            ET.fromstring(xhtml_string)
+            return True
+        except ET.ParseError as e:
+            logger.warning(f"Generated XHTML is not well-formed XML: {e}")
+            logger.debug(f"Invalid XHTML (first 500 chars): {xhtml_string[:500]}")
+            return False
+
     def translate_epub(self, input_epub_path: str, output_epub_path: str) -> None:
         """
         Processes an EPUB file: extracts XHTML content, sends it for translation
@@ -72,6 +87,9 @@ class EbtgAppService:
         Path(output_epub_path).parent.mkdir(parents=True, exist_ok=True)
 
         try:
+            # Clear any previous progress for this specific input EPUB if starting fresh,
+            # or load existing progress if implementing resume functionality (future).
+            self.progress_service.clear_progress(Path(input_epub_path).name)
             self.epub_processor.open_epub(input_epub_path)
             xhtml_items: list[EpubXhtmlItem] = self.epub_processor.get_xhtml_items()
             
@@ -109,6 +127,7 @@ class EbtgAppService:
                     if not content_items:
                         logger.warning(f"No content items extracted from {item_filename}. Keeping original content.")
                         # self.epub_processor.update_xhtml_content(item_id, xhtml_item.original_content_bytes) # Already default
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "skipped_empty_content")
                         continue
 
                     # Segment the content items
@@ -121,6 +140,7 @@ class EbtgAppService:
 
                     if not item_segments: # Should not happen if content_items was not empty
                         logger.warning(f"Content segmentation returned no segments for {item_filename}. Keeping original.")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "skipped_no_segments")
                         continue
 
                     for i, segment_items in enumerate(item_segments):
@@ -153,11 +173,13 @@ class EbtgAppService:
 
                     if segment_has_errors:
                         logger.error(f"Due to errors in one or more segments, original content will be kept for {item_filename}.")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_segment_processing", "Error during segment processing.")
                         files_with_errors += 1
                         continue 
 
                     if not final_xhtml_parts:
                         logger.warning(f"No XHTML parts generated for {item_filename} after segmentation. Keeping original.")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_no_parts_generated")
                         continue
 
                     final_generated_xhtml_for_item: str
@@ -169,27 +191,42 @@ class EbtgAppService:
                         logger.info(f"Assembled {len(item_segments)} fragments into a full XHTML for {item_filename}.")
                     else:
                         final_generated_xhtml_for_item = final_xhtml_parts[0]
-                    
-                    self.epub_processor.update_xhtml_content(item_id, final_generated_xhtml_for_item.encode('utf-8'))
+
+                    # --- Phase 2: Basic XHTML Validation ---
+                    if not self._is_well_formed_xml(final_generated_xhtml_for_item):
+                        logger.error(f"Generated XHTML for {item_filename} is not well-formed. Keeping original content.")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_validation", "Generated content is not well-formed XML.")
+                        files_with_errors += 1
+                        continue # Skip updating this item
+                    # --- End Phase 2 Validation ---
+
+                    self.epub_processor.update_xhtml_content(item_id, final_generated_xhtml_for_item.encode('utf-8')) # type: ignore
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "success") # type: ignore
 
                 except XhtmlExtractionError as e:
                     logger.error(f"Error extracting content from {item_filename}: {e}. Keeping original content.")
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_extraction", str(e))
                     files_with_errors += 1
                 except ApiXhtmlGenerationError as e:
                     logger.error(f"API error generating XHTML for {item_filename}: {e}. Keeping original content.")
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_api_generation", str(e))
                     files_with_errors += 1
                 except BtgServiceException as e: 
                     logger.error(f"BTG Service error during processing for {item_filename}: {e}. Keeping original content.")
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_btg_service", str(e))
                     files_with_errors += 1
                 except UnicodeDecodeError as e:
                     logger.error(f"Unicode decode error for {item_filename}: {e}. Keeping original content.")
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_unicode_decode", str(e))
                     files_with_errors += 1
                 except Exception as e:
                     logger.error(f"Unexpected error processing {item_filename}: {e}. Keeping original content.", exc_info=True)
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_unexpected", str(e))
                     files_with_errors += 1
             
             logger.info("All XHTML files processed. Saving new EPUB...")
             self.epub_processor.save_epub(output_epub_path)
+            self.progress_service.save_progress(output_epub_path) # Save all accumulated progress
             logger.info(f"Translated EPUB saved to: {output_epub_path}")
             if files_with_errors > 0:
                 logger.warning(f"{files_with_errors}/{total_files} files encountered errors and their original content was kept.")
@@ -199,4 +236,5 @@ class EbtgAppService:
             raise EbtgProcessingError(f"Input EPUB not found: {input_epub_path}") from e
         except Exception as e:
             logger.error(f"An error occurred during EPUB translation: {e}", exc_info=True)
+            self.progress_service.save_progress(output_epub_path) # Attempt to save progress even if main process fails
             raise EbtgProcessingError(f"EPUB translation failed: {e}") from e

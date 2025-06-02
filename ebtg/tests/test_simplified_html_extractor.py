@@ -39,19 +39,47 @@ class TestSimplifiedHtmlExtractor(unittest.TestCase):
         content_items = self.extractor.extract_content(xhtml)
 
         self.assertEqual(len(content_items), 5)
-        self.assertEqual(content_items[0], {"type": "text", "data": "First text."})
-        self.assertEqual(content_items[1], {"type": "image", "data": {"src": "img1.jpg", "alt": "Image One"}})
-        self.assertEqual(content_items[2], {"type": "text", "data": "Second text, with nested elements."})
-        self.assertEqual(content_items[3], {"type": "image", "data": {"src": "img2.jpg", "alt": "Image Two"}})
-        self.assertEqual(content_items[4], {"type": "text", "data": "Third text."})
+        self.assertEqual(content_items[0], {
+            "type": "text", "data": "First text."
+        })
+        self.assertEqual(content_items[1], {
+            "type": "image",
+            "data": {
+                "src": "img1.jpg",
+                "alt": "Image One",
+                "context_before_snippet": "First text."
+                # context_after_snippet is empty here because the next element is <p>
+            }
+        })
+        self.assertEqual(content_items[2], {
+            "type": "text", "data": "Second text, with nested elements."
+        })
+        self.assertEqual(content_items[3], {
+            "type": "image",
+            "data": {
+                "src": "img2.jpg",
+                "alt": "Image Two",
+                "context_before_snippet": "Second text, with nested elements."
+                # context_after_snippet is empty here because the next element is <p>
+            }
+        })
+        self.assertEqual(content_items[4], {
+            "type": "text", "data": "Third text."
+        })
 
     def test_extract_no_body_tag(self):
         xhtml = "<p>Text without body.</p><img src='test.gif' alt='Test'/>"
         content_items = self.extractor.extract_content(xhtml)
         self.assertEqual(len(content_items), 2)
         self.assertEqual(content_items[0], {"type": "text", "data": "Text without body."})
-        self.assertEqual(content_items[1], {"type": "image", "data": {"src": "test.gif", "alt": "Test"}})
-
+        self.assertEqual(content_items[1], {
+            "type": "image",
+            "data": {
+                "src": "test.gif",
+                "alt": "Test",
+                "context_before_snippet": "Text without body."
+            }
+        })
     def test_extract_image_no_alt(self):
         xhtml = '<body><img src="no_alt.svg"/></body>'
         content_items = self.extractor.extract_content(xhtml)
@@ -84,9 +112,17 @@ class TestSimplifiedHtmlExtractor(unittest.TestCase):
         xhtml = "<body>Text before <img src='img.png' alt='alt text'/> text after.</body>"
         content_items = self.extractor.extract_content(xhtml)
         self.assertEqual(len(content_items), 3)
-        self.assertEqual(content_items[0], {"type": "text", "data": "Text before"})
-        self.assertEqual(content_items[1], {"type": "image", "data": {"src": "img.png", "alt": "alt text"}})
-        self.assertEqual(content_items[2], {"type": "text", "data": "text after."})
+        self.assertEqual(content_items[0], {
+            "type": "text", "data": "Text before"
+        })
+        self.assertEqual(content_items[1], {
+            "type": "image",
+            "data": {"src": "img.png", "alt": "alt text", "context_before_snippet": "Text before", "context_after_snippet": "text after."}
+        })
+        self.assertEqual(content_items[2], {
+            "type": "text", "data": "text after."
+        })
+
 
 if __name__ == '__main__':
     unittest.main()

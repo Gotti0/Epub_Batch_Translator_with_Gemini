@@ -1,0 +1,12 @@
+2025-06-02 17:42:05,822 - btg_module.app_service - INFO - 애플리케이션 설정 로드 중...
+2025-06-02 17:42:05,823 - btg_module.app_service - INFO - 애플리케이션 설정 로드 완료.
+2025-06-02 17:42:05,823 - btg_module.app_service - INFO - Gemini Developer API 사용 모드입니다.
+2025-06-02 17:42:05,823 - btg_module.app_service - WARNING - Gemini Developer API 모드이지만 사용할 API 키가 설정에 없습니다.
+2025-06-02 17:42:05,823 - btg_module.app_service - WARNING - API 키 또는 Vertex AI 설정이 충분하지 않아 Gemini 클라이언트 초기화를 시도하지 않습니다.
+2025-06-02 17:42:05,824 - btg_module.app_service - WARNING - Gemini 클라이언트가 초기화되지 않아 번역 및 고유명사 서비스가 비활성화됩니다.
+2025-06-02 17:42:16,941 - btg_module.app_service - INFO - 애플리케이션 설정 로드 중...
+2025-06-02 17:42:16,942 - btg_module.app_service - INFO - 애플리케이션 설정 로드 완료.
+2025-06-02 17:42:16,942 - btg_module.app_service - INFO - Gemini Developer API 사용 모드입니다.
+2025-06-02 17:42:16,943 - btg_module.app_service - WARNING - Gemini Developer API 모드이지만 사용할 API 키가 설정에 없습니다.
+2025-06-02 17:42:16,943 - btg_module.app_service - WARNING - API 키 또는 Vertex AI 설정이 충분하지 않아 Gemini 클라이언트 초기화를 시도하지 않습니다.
+2025-06-02 17:42:16,943 - btg_module.app_service - WARNING - Gemini 클라이언트가 초기화되지 않아 번역 및 고유명사 서비스가 비활성화됩니다.

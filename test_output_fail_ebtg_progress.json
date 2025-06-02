@@ -1,0 +1,8 @@
+{
+    "test_input_fail.epub": {
+        "fail.xhtml": {
+            "status": "failed_segment_processing",
+            "error": "Error during segment processing."
+        }
+    }
+}

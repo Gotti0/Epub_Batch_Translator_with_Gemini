@@ -12,10 +12,9 @@ class TestBtgIntegrationService(unittest.TestCase):
         # Ensure translation_service attribute exists on the mock
         self.mock_btg_app_service.translation_service = MagicMock() 
 
-        self.ebtg_config = {
-            "target_language": "ko", # Default, can be overridden in tests
-            "prompt_instructions_for_xhtml_generation": "Test Prompt Instructions: {{content_items}} Target: {{target_language}}"
-        }
+        # ebtg_config is not directly used by BtgIntegrationService for prompt construction in the new setup,
+        # as prompt_instructions are passed directly to generate_xhtml.
+        self.ebtg_config = {} # Minimal config, specific values passed in tests.
         self.integration_service = BtgIntegrationService(
             btg_app_service=self.mock_btg_app_service,
             ebtg_config=self.ebtg_config
@@ -50,7 +49,21 @@ class TestBtgIntegrationService(unittest.TestCase):
         self.assertEqual(call_args.id_prefix, test_id_prefix)
         self.assertEqual(call_args.content_items, test_content_items)
         self.assertEqual(call_args.target_language, test_target_lang)
-        self.assertEqual(call_args.prompt_instructions, test_prompt_instr) # This is the EBTG level prompt
+        
+        # Verify enhanced prompt construction
+        self.assertIn(test_prompt_instr, call_args.prompt_instructions)
+        self.assertIn("Image Placement:", call_args.prompt_instructions)
+        self.assertIn("Basic Block Structure:", call_args.prompt_instructions)
+        self.assertIn("Novel Dialogue Formatting:", call_args.prompt_instructions)
+        
+        # Check that the base prompt is at the beginning of the enhanced prompt
+        self.assertTrue(call_args.prompt_instructions.startswith(test_prompt_instr))
+
+        # Check specific phrases from enhancement prompts
+        self.assertIn("Images (represented by {'type': 'image', ...} items", call_args.prompt_instructions)
+        self.assertIn("Ensure consistent use of fundamental HTML block-level tags", call_args.prompt_instructions)
+        self.assertIn("For dialogue sections, if they can be identified", call_args.prompt_instructions)
+
         self.assertIn("translated_xhtml_content", call_args.response_schema_for_gemini["properties"])
 
 
@@ -96,6 +109,36 @@ class TestBtgIntegrationService(unittest.TestCase):
                 target_language="ko",
                 prompt_instructions="Translate this."
             )
+
+    def test_prompt_enhancements_are_included(self):
+        test_id_prefix = "prompt_test"
+        test_content_items = [{"type": "text", "data": "Check prompts"}]
+        test_target_lang = "en"
+        base_prompt = "Base instructions for testing."
+
+        # Mock the call to btg_app_service to prevent actual API call, just inspect the DTO
+        self.mock_btg_app_service.generate_xhtml_from_content_items.return_value = XhtmlGenerationResponseDTO(
+            id_prefix=test_id_prefix,
+            generated_xhtml_string="<p>Checked</p>"
+        )
+
+        self.integration_service.generate_xhtml(
+            id_prefix=test_id_prefix,
+            content_items=test_content_items,
+            target_language=test_target_lang,
+            prompt_instructions=base_prompt
+        )
+
+        # Verify the call and inspect the DTO passed
+        self.mock_btg_app_service.generate_xhtml_from_content_items.assert_called_once()
+        request_dto_arg = self.mock_btg_app_service.generate_xhtml_from_content_items.call_args[0][0]
+
+        self.assertIsInstance(request_dto_arg, XhtmlGenerationRequestDTO)
+        self.assertTrue(request_dto_arg.prompt_instructions.startswith(base_prompt))
+        self.assertIn("Image Placement: Images (represented by {'type': 'image', ...} items", request_dto_arg.prompt_instructions)
+        self.assertIn("Basic Block Structure: Ensure consistent use of fundamental HTML block-level tags.", request_dto_arg.prompt_instructions)
+        self.assertIn("Novel Dialogue Formatting: For dialogue sections, if they can be identified", request_dto_arg.prompt_instructions)
+
 
 if __name__ == '__main__':
     unittest.main()
