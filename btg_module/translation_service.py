@@ -5,7 +5,8 @@ import re
 import csv
 import json # For formatting content_items in prompt
 from pathlib import Path # Added import for Path
-from typing import Dict, Any, Optional, List, Union
+from typing import List, Dict, Any, Optional, Union # Union 추가 # type: ignore
+
 import os
 
 try:
@@ -26,7 +27,7 @@ try:
     # from google.genai import types as genai_types 
     from .dtos import LorebookEntryDTO # 로어북 DTO 임포트
 except ImportError:
-    from gemini_client import (
+    from .gemini_client import ( # Fallback to relative
         GeminiClient,
         GeminiContentSafetyException,
         GeminiRateLimitException,
@@ -34,11 +35,11 @@ except ImportError:
         GeminiInvalidRequestException,
         GeminiAllApiKeysExhaustedException 
     )
-    from file_handler import read_json_file
-    from logger_config import setup_logger
-    from exceptions import BtgTranslationException, BtgApiClientException, BtgServiceException # Added BtgServiceException
-    from chunk_service import ChunkService
-    from dtos import LorebookEntryDTO # 로어북 DTO 임포트
+    from .file_handler import read_json_file # Fallback to relative
+    from .logger_config import setup_logger # Fallback to relative
+    from .exceptions import BtgTranslationException, BtgApiClientException, BtgServiceException # Fallback to relative
+    from .chunk_service import ChunkService # Fallback to relative
+    from .dtos import LorebookEntryDTO # Fallback to relative
     # from google.genai import types as genai_types # Fallback import
 
 logger = setup_logger(__name__)

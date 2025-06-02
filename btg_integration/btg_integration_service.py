@@ -6,7 +6,7 @@ from btg_module.app_service import AppService as BtgAppService
 from btg_module.dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO
 from btg_module.exceptions import BtgServiceException, BtgApiClientException
 
-from ..ebtg.ebtg_exceptions import ApiXhtmlGenerationError 
+from ebtg.ebtg_exceptions import ApiXhtmlGenerationError 
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,10 @@ class BtgIntegrationService:
             logger.debug(f"Sending XhtmlGenerationRequestDTO to BTG: id_prefix={id_prefix}, {len(content_items)} items.")
             response_dto: XhtmlGenerationResponseDTO = self.btg_app_service.generate_xhtml_from_content_items(request_dto)
 
+            if not isinstance(response_dto, XhtmlGenerationResponseDTO):
+                logger.error(f"BTG AppService returned an unexpected type: {type(response_dto)}. Expected XhtmlGenerationResponseDTO.")
+                raise ApiXhtmlGenerationError(f"BTG AppService returned an unexpected type: {type(response_dto)}")
+
             if response_dto.error_message:
                 logger.error(f"BTG reported error for {id_prefix}: {response_dto.error_message}")
                 return None 
@@ -57,9 +61,14 @@ class BtgIntegrationService:
                 logger.warning(f"BTG returned no XHTML string and no error for {id_prefix}. Assuming failure.")
                 return None
 
+        except ApiXhtmlGenerationError: # If ApiXhtmlGenerationError is raised directly (e.g., by mock or initial check)
+            raise # Re-raise it so test assertions can catch it
         except (BtgApiClientException, BtgServiceException) as e: 
             logger.error(f"BTG Exception for {id_prefix}: {e}", exc_info=True)
             raise ApiXhtmlGenerationError(f"Error via BTG for {id_prefix}: {e}") from e
         except Exception as e:
+            # This block will now only catch exceptions other than ApiXhtmlGenerationError,
+            # BtgApiClientException, or BtgServiceException that might occur.
             logger.error(f"Unexpected error in BtgIntegrationService for {id_prefix}: {e}", exc_info=True)
+            # Consider if this should also raise ApiXhtmlGenerationError or return None
             return None

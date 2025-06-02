@@ -34,10 +34,10 @@ try:
     from .chunk_service import ChunkService
     from .exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException
     from .dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 임포트 확인
-    from dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
+    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트 (Corrected to relative)
 except ImportError:
     # Fallback imports
-    from file_handler import (
+    from .file_handler import ( # Fallback to relative
         read_text_file, write_text_file,
         save_chunk_with_index_to_file, get_metadata_file_path, delete_file,
         load_chunks_from_file,
@@ -46,14 +46,14 @@ except ImportError:
         _hash_config_for_metadata,
         save_merged_chunks_to_file
     )
-    from config_manager import ConfigManager
-    from gemini_client import GeminiClient, GeminiAllApiKeysExhaustedException, GeminiInvalidRequestException
-    from translation_service import TranslationService
-    from lorebook_service import LorebookService
-    from chunk_service import ChunkService
-    from exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException
-    from dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 임포트 확인
-    from dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트
+    from .config_manager import ConfigManager # Fallback to relative
+    from .gemini_client import GeminiClient, GeminiAllApiKeysExhaustedException, GeminiInvalidRequestException # Fallback to relative
+    from .translation_service import TranslationService # Fallback to relative
+    from .lorebook_service import LorebookService # Fallback to relative
+    from .chunk_service import ChunkService # Fallback to relative
+    from .exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException # Fallback to relative
+    from .dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # Fallback to relative
+    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # Fallback to relative
 
 logger = setup_logger(__name__)
 
