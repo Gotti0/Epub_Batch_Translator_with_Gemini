@@ -5,10 +5,13 @@ import threading
 import os
 from pathlib import Path
 import sys # sys 모듈 임포트
+import inspect # inspect 모듈 임포트
 
-# 프로젝트 루트 디렉토리를 sys.path에 추가
-project_root = Path(__file__).resolve().parent
-sys.path.append(str(project_root))
+# EBTG_Project 루트 디렉토리를 sys.path에 추가
+current_file_path = Path(inspect.getfile(inspect.currentframe())).resolve()
+ebtg_project_root = current_file_path.parent.parent # btg_module의 부모 디렉토리
+if str(ebtg_project_root) not in sys.path:
+    sys.path.insert(0, str(ebtg_project_root))
 
 from typing import Optional, Dict, Any, List, Callable, Union
 from dataclasses import dataclass
@@ -19,17 +22,17 @@ import logging
 
 # 4계층 아키텍처의 AppService 및 DTOs, Exceptions 임포트
 try:
-    from app_service import AppService
-    from dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO, ModelInfoDTO # Changed PronounExtractionProgressDTO
-    from exceptions import BtgConfigException, BtgServiceException, BtgFileHandlerException, BtgApiClientException, BtgBusinessLogicException, BtgException # BtgPronounException removed, BtgBusinessLogicException added
-    from logger_config import setup_logger
-    from file_handler import get_metadata_file_path, load_metadata, _hash_config_for_metadata, delete_file # PRONOUN_CSV_HEADER removed
+    from btg_module.app_service import AppService
+    from btg_module.dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO, ModelInfoDTO # Changed PronounExtractionProgressDTO
+    from btg_module.exceptions import BtgConfigException, BtgServiceException, BtgFileHandlerException, BtgApiClientException, BtgBusinessLogicException, BtgException # BtgPronounException removed, BtgBusinessLogicException added
+    from btg_module.logger_config import setup_logger
+    from btg_module.file_handler import get_metadata_file_path, load_metadata, _hash_config_for_metadata, delete_file # PRONOUN_CSV_HEADER removed
 except ImportError as e:
     # Critical error: GUI cannot function without these core components.
     # Print to stderr and a simple dialog if tkinter is available enough for that.
     error_message = (
         f"초기 임포트 오류: {e}.\n"
-        "스크립트가 프로젝트 루트에서 실행되고 있는지, "
+        "btg_module이 EBTG_Project 내에 올바르게 위치하고 있는지, "
         "PYTHONPATH가 올바르게 설정되었는지 확인하세요.\n"
         "필수 모듈을 임포트할 수 없어 GUI를 시작할 수 없습니다."
     )

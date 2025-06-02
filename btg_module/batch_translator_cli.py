@@ -7,6 +7,13 @@ from typing import Optional, Dict, List, Callable, Any
 import threading
 import logging
 import json
+import inspect # inspect 모듈 임포트
+
+# EBTG_Project 루트 디렉토리를 sys.path에 추가
+current_file_path = Path(inspect.getfile(inspect.currentframe())).resolve()
+ebtg_project_root = current_file_path.parent.parent # btg_module의 부모 디렉토리
+if str(ebtg_project_root) not in sys.path:
+    sys.path.insert(0, str(ebtg_project_root))
 
 # tqdm 및 기타 필요한 모듈 임포트
 try:
@@ -67,11 +74,11 @@ except ImportError:
 Tqdm = tqdm
 
 try:
-    from app_service import AppService
-    from dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 변경
-    from exceptions import BtgException
-    from logger_config import setup_logger
-    from file_handler import (
+    from btg_module.app_service import AppService
+    from btg_module.dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 변경
+    from btg_module.exceptions import BtgException
+    from btg_module.logger_config import setup_logger
+    from btg_module.file_handler import (
         read_text_file, get_metadata_file_path, load_metadata,
         _hash_config_for_metadata, delete_file
     )
