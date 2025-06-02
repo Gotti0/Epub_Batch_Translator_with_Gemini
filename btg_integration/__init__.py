@@ -1,2 +1,1 @@
-# This file makes 'btg_module' a Python package.
-# You can leave it empty or add package-level initializations here.
+# This file makes Python treat the directory as a package.
