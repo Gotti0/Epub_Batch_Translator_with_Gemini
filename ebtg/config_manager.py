@@ -29,8 +29,9 @@ class EbtgConfigManager:
             ),
             "btg_config_path": None, # Path to btg_module's config.json, or None to use BTG's default
             "content_segmentation_max_items": 0, # 0 or negative means no segmentation by item count
-            "perform_epub_validation": True # New option to control EPUB validation
-        }
+            "perform_epub_validation": True, # New option to control EPUB validation
+            "perform_content_omission_check": True # New option for content omission check
+     }
 
     def load_config(self) -> Dict[str, Any]:
         default_cfg = self.get_default_config()
