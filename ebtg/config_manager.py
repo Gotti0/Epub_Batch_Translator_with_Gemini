@@ -28,7 +28,8 @@ class EbtgConfigManager:
                 "Ensure correct relative order of items. The items are:"
             ),
             "btg_config_path": None, # Path to btg_module's config.json, or None to use BTG's default
-            "content_segmentation_max_items": 0 # 0 or negative means no segmentation by item count
+            "content_segmentation_max_items": 0, # 0 or negative means no segmentation by item count
+            "perform_epub_validation": True # New option to control EPUB validation
         }
 
     def load_config(self) -> Dict[str, Any]:

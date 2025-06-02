@@ -1,3 +1,5 @@
 ebooklib
 beautifulsoup4
 google-genai
+epubcheck
+html5validator
