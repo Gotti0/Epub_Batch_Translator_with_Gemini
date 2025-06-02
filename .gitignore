@@ -26,9 +26,12 @@ share/python-wheels/
 # Virtual Environments
 .env
 .venv
+.myenv
 env/
 venv/
 ENV/
+myenv/
+
 
 # IDE / Editor specific files
 .idea/
