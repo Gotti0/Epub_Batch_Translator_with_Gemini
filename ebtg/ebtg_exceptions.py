@@ -74,6 +74,11 @@ class EbtgApiCommsError(EbtgIntegrationError):
     """BTG 모듈과의 API 통신 중 일반적인 오류 (예: 네트워크 문제, 잘못된 응답 형식 등)."""
     pass
 
+class ApiXhtmlGenerationError(EbtgIntegrationError):
+    """BTG 모듈 또는 Gemini API를 통해 XHTML 문자열을 생성하는 과정에서 발생하는 오류입니다 (아키텍처 v7)."""
+    pass
+
+
 # --- EBTG Internal Processing Errors ---
 class EbtgProcessingError(EbtgBaseException):
     """EBTG 내부 데이터 처리 중 발생하는 일반적인 오류입니다."""
@@ -95,6 +100,13 @@ class HtmlReconstructionError(EbtgFileProcessingError):
     번역된 텍스트와 원본 HTML 구조를 바탕으로 최종 HTML을 재구성하는 과정에서
     발생하는 오류입니다.
     예: 구조 불일치, 누락된 요소, 잘못된 삽입 위치 등.
+    """
+    pass
+
+class XhtmlExtractionError(EbtgFileProcessingError):
+    """
+    XHTML 파일에서 텍스트 블록 및 이미지 정보를 추출하는 과정(예: SimplifiedHtmlExtractor)에서
+    발생하는 오류입니다 (아키텍처 v7).
     """
     pass
 

@@ -60,6 +60,32 @@ class BtgStructuredResponseDto:
     raw_response_preview: Optional[str] = None # 디버깅용 원본 API 응답 (일부)
 
 
+# --- DTOs for API-centric XHTML Generation (EBTG <-> BTG for v7 Arch) ---
+@dataclass
+class XhtmlGenerationRequest:
+    """
+    EBTG -> BTG: XHTML 생성을 요청하기 위한 DTO입니다.
+    BtgIntegrationService에서 BTG 모듈의 AppService로 전달될 데이터의 EBTG 측 표현입니다.
+    """
+    id_prefix: str  # XHTML 파일 식별용 (예: chapter1.xhtml)
+    content_items: List[Dict[str, Any]] # 텍스트 블록 및 이미지 정보 리스트
+                                        # 예: [{"type": "text", "data": "..."}, {"type": "image", "data": {"src": "...", "alt": "..."}}]
+    target_language: str # 번역 목표 언어
+    prompt_instructions_for_xhtml_generation: str # Gemini API에 전달될 XHTML 생성 지침
+
+@dataclass
+class XhtmlGenerationResponse:
+    """
+    BTG -> EBTG: 생성된 XHTML 문자열을 반환하기 위한 DTO입니다.
+    BTG 모듈의 AppService에서 BtgIntegrationService로 반환될 데이터의 EBTG 측 표현입니다.
+    """
+    id_prefix: str
+    generated_xhtml_string: Optional[str] = None
+    errors: Optional[str] = None # API 생성 실패 또는 기타 오류 메시지
+
+
+
+
 if __name__ == '__main__':
     # DTO 사용 예시
     print("--- EBTG DTO 사용 예시 ---")
@@ -105,3 +131,28 @@ if __name__ == '__main__':
         success=True
     )
     print(f"Phase 3 응답 DTO: {structured_res}")
+
+    # API-centric XHTML Generation DTOs 예시
+    xhtml_gen_req = XhtmlGenerationRequest(
+        id_prefix="chapter1_v7.xhtml",
+        content_items=[
+            {"type": "text", "data": "This is the first paragraph."},
+            {"type": "image", "data": {"src": "images/image1.png", "alt": "An illustrative image"}},
+            {"type": "text", "data": "This is the second paragraph after the image."}
+        ],
+        target_language="ko",
+        prompt_instructions_for_xhtml_generation="Translate the text segments and include the image in its original position. Wrap paragraphs in <p> tags."
+    )
+    print(f"XHTML Generation Request DTO (EBTG->BTG): {xhtml_gen_req}")
+
+    xhtml_gen_res_success = XhtmlGenerationResponse(
+        id_prefix="chapter1_v7.xhtml",
+        generated_xhtml_string="<p>이것은 첫 번째 단락입니다.</p><img src='images/image1.png' alt='예시 이미지'/><p>이것은 이미지 뒤의 두 번째 단락입니다.</p>"
+    )
+    print(f"XHTML Generation Response DTO (BTG->EBTG - Success): {xhtml_gen_res_success}")
+
+    xhtml_gen_res_error = XhtmlGenerationResponse(
+        id_prefix="chapter2_v7.xhtml",
+        errors="Failed to generate XHTML due to content policy violation."
+    )
+    print(f"XHTML Generation Response DTO (BTG->EBTG - Error): {xhtml_gen_res_error}")
