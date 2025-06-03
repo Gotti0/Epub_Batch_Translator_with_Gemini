@@ -180,7 +180,7 @@ class EbtgAppService:
                 # Default prompt
                 "You are generating a fragment of a larger XHTML document. Based on the overall task: '{overall_task_description}'. Now, translate the following text blocks and integrate the image information to create XHTML body content. Preserve image sources and translate alt text if present. Wrap paragraphs in <p> tags. Do NOT include html, head, or body tags. Ensure correct relative order of items. The items are:"
             )
-            xhtml_segment_target_chars = self.config.get("xhtml_segment_target_chars", 15000) # New parameter
+            xhtml_segment_target_chars = self.config.get("xhtml_segment_target_chars", 4000) # New parameter
 
 
             for xhtml_item in xhtml_items:

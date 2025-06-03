@@ -3,7 +3,7 @@
     "prompt_instructions_for_xhtml_generation": "Translate the following text blocks and integrate the image information to create a complete and valid XHTML document. Preserve image sources and translate alt text if present. Wrap paragraphs in <p> tags. Ensure the output is a single, well-formed XHTML string.",
     "prompt_instructions_for_xhtml_fragment_generation": "You are generating a fragment of a larger XHTML document. The overall task is: '{overall_task_description}'. Now, translate the provided text blocks and integrate the image information to create XHTML body content. Preserve image sources and translate alt text if present. Wrap paragraphs in <p> tags. Do NOT include html, head, or body tags. Ensure correct relative order of items. The items are:",
     "btg_config_path": null,
-    "xhtml_segment_target_chars": 15000,
+    "xhtml_segment_target_chars": 4000,
     "perform_epub_validation": true,
     "perform_content_omission_check": true,
     "api_keys": [],

@@ -124,11 +124,37 @@ class ScrollableFrame:
         # Optionally, clear focus or set to another widget on <Leave> if it causes issues.
         # e.g., self.main_frame.bind('<Leave>', lambda e: self.main_frame.focus_set())
 
-    def pack(self, **kwargs):
-        self.main_frame.pack(**kwargs)
+class Tooltip:
+    """
+    위젯 위에 마우스를 올렸을 때 툴팁 메시지를 표시하는 클래스입니다.
+    """
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip_window = None
+        self.widget.bind("<Enter>", self.show_tooltip)
+        self.widget.bind("<Leave>", self.hide_tooltip)
 
-    def grid(self, **kwargs):
-        self.main_frame.grid(**kwargs)
+    def show_tooltip(self, event=None):
+        if self.tooltip_window or not self.text:
+            return
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         font=("tahoma", "8", "normal"))
+        label.pack(ipadx=1)
+
+    def hide_tooltip(self, event=None):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+        self.tooltip_window = None
 
 class EbtgGui:
     def __init__(self, root_window):
@@ -208,16 +234,20 @@ class EbtgGui:
         self.input_epub_var = tk.StringVar()
         self.input_epub_entry = ttk.Entry(file_frame, textvariable=self.input_epub_var, width=60)
         self.input_epub_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.EW)
+        Tooltip(self.input_epub_entry, "번역할 EPUB 파일의 경로입니다.")
         self.browse_input_btn = ttk.Button(file_frame, text="Browse...", command=self.browse_input_file)
         self.browse_input_btn.grid(row=0, column=2, padx=5, pady=5)
+        Tooltip(self.browse_input_btn, "컴퓨터에서 EPUB 파일을 선택합니다.")
 
         ttk.Label(file_frame, text="출력 EPUB:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
         self.output_epub_var = tk.StringVar()
         self.output_epub_entry = ttk.Entry(file_frame, textvariable=self.output_epub_var, width=60)
         self.output_epub_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.EW)
+        Tooltip(self.output_epub_entry, "번역된 EPUB 파일이 저장될 경로입니다.")
         self.browse_output_btn = ttk.Button(file_frame, text="Browse...", command=self.browse_output_path)
         self.browse_output_btn.grid(row=1, column=2, padx=5, pady=5)
-        
+        Tooltip(self.browse_output_btn, "번역된 파일을 저장할 위치와 파일명을 선택합니다.")
+
         file_frame.columnconfigure(1, weight=1)
 
         # --- Controls Frame ---
@@ -226,9 +256,11 @@ class EbtgGui:
 
         self.start_button = ttk.Button(controls_frame, text="번역 시작", command=self.start_translation)
         self.start_button.pack(side=tk.LEFT, padx=5)
-        
+        Tooltip(self.start_button, "선택한 EPUB 파일의 번역을 시작합니다.")
+
         self.stop_button = ttk.Button(controls_frame, text="중지", command=self.request_stop_translation, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
+        Tooltip(self.stop_button, "진행 중인 번역 작업을 중지합니다.")
         
         # --- Progress Bar and Status ---
         progress_status_frame = ttk.Frame(parent_frame, padding="5")
@@ -236,10 +268,12 @@ class EbtgGui:
 
         self.progress_bar = ttk.Progressbar(progress_status_frame, orient="horizontal", length=300, mode="determinate")
         self.progress_bar.pack(fill=tk.X, expand=True, side=tk.TOP, padx=5, pady=(0,2)) # progress_bar를 위로
+        Tooltip(self.progress_bar, "번역 진행 상태를 보여줍니다.")
         
         self.status_var = tk.StringVar(value="준비됨.")
         status_label = ttk.Label(progress_status_frame, textvariable=self.status_var, anchor=tk.W)
         status_label.pack(side=tk.TOP, padx=5, fill=tk.X, expand=True, pady=(2,0)) # status_label을 아래로
+        Tooltip(status_label, "현재 작업 상태 메시지를 표시합니다.")
 
     def _create_settings_tab_widgets(self, settings_frame):
         # This frame is the self.settings_scroll_frame.scrollable_frame
@@ -251,34 +285,42 @@ class EbtgGui:
         self.api_keys_label = ttk.Label(api_frame, text="API 키 목록 (Gemini Developer, 한 줄에 하나씩):")
         self.api_keys_label.grid(row=0, column=0, padx=5, pady=5, sticky="nw")
         self.api_keys_text = scrolledtext.ScrolledText(api_frame, width=58, height=3, wrap=tk.WORD)
+        Tooltip(self.api_keys_text, "Google AI Studio에서 발급받은 Gemini API 키를 입력합니다.\n여러 개 입력 시 한 줄에 하나씩 입력하세요.")
         self.api_keys_text.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
 
         self.use_vertex_ai_var = tk.BooleanVar() # type: ignore
         self.use_vertex_ai_check = ttk.Checkbutton(api_frame, text="Vertex AI 사용 (BTG Module)", variable=self.use_vertex_ai_var, command=self._toggle_vertex_fields)
         self.use_vertex_ai_check.grid(row=1, column=0, columnspan=3, padx=5, pady=2, sticky="w")
+        Tooltip(self.use_vertex_ai_check, "Google Cloud Vertex AI를 사용하여 번역하려면 선택하세요.\n선택 시 아래 Vertex AI 관련 설정을 입력해야 합니다.")
 
         self.service_account_file_label = ttk.Label(api_frame, text="서비스 계정 JSON 파일 (Vertex AI):")
         self.service_account_file_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.service_account_file_entry = ttk.Entry(api_frame, width=50)
         self.service_account_file_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        Tooltip(self.service_account_file_entry, "Vertex AI 사용 시 필요한 서비스 계정 키 JSON 파일의 경로입니다.")
         self.browse_sa_file_button = ttk.Button(api_frame, text="찾아보기", command=self._browse_service_account_file)
         self.browse_sa_file_button.grid(row=2, column=2, padx=5, pady=5)
+        Tooltip(self.browse_sa_file_button, "서비스 계정 JSON 파일을 선택합니다.")
 
         self.gcp_project_label = ttk.Label(api_frame, text="GCP 프로젝트 ID (Vertex AI):")
         self.gcp_project_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
         self.gcp_project_entry = ttk.Entry(api_frame, width=30)
         self.gcp_project_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+        Tooltip(self.gcp_project_entry, "Vertex AI를 사용하는 Google Cloud Platform 프로젝트의 ID입니다.")
 
         self.gcp_location_label = ttk.Label(api_frame, text="GCP 위치 (Vertex AI):")
         self.gcp_location_label.grid(row=4, column=0, padx=5, pady=5, sticky="w")
         self.gcp_location_entry = ttk.Entry(api_frame, width=30)
         self.gcp_location_entry.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
+        Tooltip(self.gcp_location_entry, "Vertex AI 서비스가 위치한 GCP 리전입니다. (예: us-central1)")
 
         ttk.Label(api_frame, text="모델 이름 (BTG Module):").grid(row=5, column=0, padx=5, pady=5, sticky="w")
         self.model_name_combobox = ttk.Combobox(api_frame, width=57)
         self.model_name_combobox.grid(row=5, column=1, padx=5, pady=5, sticky="ew")
+        Tooltip(self.model_name_combobox, "번역에 사용할 Gemini 모델을 선택합니다.\n새로고침 버튼으로 사용 가능한 모델 목록을 업데이트할 수 있습니다.")
         self.refresh_models_button = ttk.Button(api_frame, text="새로고침", command=self._update_model_list_ui)
         self.refresh_models_button.grid(row=5, column=2, padx=5, pady=5)
+        Tooltip(self.refresh_models_button, "사용 가능한 Gemini 모델 목록을 새로고침합니다.")
 
         # 생성 파라미터
         gen_param_frame = ttk.LabelFrame(settings_frame, text="생성 파라미터 (BTG Module)", padding="10")
@@ -286,23 +328,25 @@ class EbtgGui:
         
         ttk.Label(gen_param_frame, text="Temperature:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.temperature_scale = ttk.Scale(gen_param_frame, from_=0.0, to=2.0, orient="horizontal", length=200, command=lambda v: self.temperature_label.config(text=f"{float(v):.2f}"))
+        Tooltip(self.temperature_scale, "모델 응답의 무작위성을 조절합니다.\n낮을수록 결정적, 높을수록 다양성이 증가합니다. (기본값: 0.7)")
         self.temperature_scale.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         self.temperature_label = ttk.Label(gen_param_frame, text="0.00")
         self.temperature_label.grid(row=0, column=2, padx=5, pady=5)
         
         ttk.Label(gen_param_frame, text="Top P:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.top_p_scale = ttk.Scale(gen_param_frame, from_=0.0, to=1.0, orient="horizontal", length=200, command=lambda v: self.top_p_label.config(text=f"{float(v):.2f}"))
+        Tooltip(self.top_p_scale, "모델이 다음 단어를 선택할 때 고려하는 확률 분포의 누적값을 조절합니다.\n낮을수록 보수적, 높을수록 다양한 단어 선택 (기본값: 0.9)")
         self.top_p_scale.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
         self.top_p_label = ttk.Label(gen_param_frame, text="0.00")
         self.top_p_label.grid(row=1, column=2, padx=5, pady=5)
 
-        # 파일 및 처리 설정 (EBTG에서는 EPUB 처리 관련 설정이므로, BTG의 텍스트 파일 처리와 다름)
-        # 청크 크기, 최대 작업자 수, RPM 등은 EBTG AppService의 config를 통해 BTG 모듈에 전달
+        # 파일 및 처리 설정
         processing_frame = ttk.LabelFrame(settings_frame, text="처리 설정 (BTG Module)", padding="10")
         processing_frame.pack(fill="x", padx=5, pady=5)
 
         ttk.Label(processing_frame, text="청크 크기 (BTG):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.btg_chunk_size_entry = ttk.Entry(processing_frame, width=10)
+        Tooltip(self.btg_chunk_size_entry, "BTG 모듈 내부에서 텍스트를 나누어 API에 요청할 때의 최대 글자 수입니다. (기본값: 6000)")
         self.btg_chunk_size_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         
         ttk.Label(processing_frame, text="최대 작업자 수 (BTG):").grid(row=0, column=2, padx=5, pady=5, sticky="w")
@@ -311,6 +355,7 @@ class EbtgGui:
         
         ttk.Label(processing_frame, text="분당 요청 수 (RPM, BTG):").grid(row=0, column=4, padx=5, pady=5, sticky="w")
         self.btg_rpm_entry = ttk.Entry(processing_frame, width=5)
+        Tooltip(self.btg_rpm_entry, "API에 분당 보낼 수 있는 최대 요청 횟수입니다. API 제한에 맞춰 조절하세요. (기본값: 60)")
         self.btg_rpm_entry.grid(row=0, column=5, padx=5, pady=5, sticky="w")
 
         # EBTG 자체 설정 (예: XHTML 분할 크기)
@@ -318,17 +363,20 @@ class EbtgGui:
         ebtg_specific_frame.pack(fill="x", padx=5, pady=5)
         ttk.Label(ebtg_specific_frame, text="XHTML 세그먼트 목표 문자 수:").grid(row=0, column=0, padx=5, pady=5, sticky="w") # 레이블 변경
         self.ebtg_xhtml_segment_target_chars_entry = ttk.Entry(ebtg_specific_frame, width=10) # 변수명 변경
+        Tooltip(self.ebtg_xhtml_segment_target_chars_entry, "하나의 XHTML 파일을 여러 조각으로 나누어 번역할 때, 각 조각의 목표 글자 수입니다.\n0 또는 음수이면 나누지 않습니다. (기본값: 4000)")
         self.ebtg_xhtml_segment_target_chars_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        self.ebtg_xhtml_segment_target_chars_entry.insert(0, "15000") # 기본값 변경
+        self.ebtg_xhtml_segment_target_chars_entry.insert(0, "4000") # 기본값 변경
 
         # 언어 설정 (BTG Module)
         language_settings_frame = ttk.LabelFrame(settings_frame, text="언어 설정 (BTG Module)", padding="10")
         language_settings_frame.pack(fill="x", padx=5, pady=5)
         ttk.Label(language_settings_frame, text="번역 출발 언어 (BTG):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.btg_novel_language_entry = ttk.Entry(language_settings_frame, width=10)
+        Tooltip(self.btg_novel_language_entry, "BTG 모듈이 텍스트 번역 시 원본 언어를 감지하지 못할 경우 사용할 언어 코드입니다.\n(예: en, ja, ko, 'auto'로 설정 시 자동 감지 시도)")
         self.btg_novel_language_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         ttk.Label(language_settings_frame, text="폴백 언어 (BTG):").grid(row=0, column=2, padx=5, pady=5, sticky="w")
         self.btg_novel_language_fallback_entry = ttk.Entry(language_settings_frame, width=10)
+        Tooltip(self.btg_novel_language_fallback_entry, "BTG 모듈이 자동 언어 감지에 실패했을 때 기본으로 사용할 언어 코드입니다. (예: ja)")
         self.btg_novel_language_fallback_entry.grid(row=0, column=3, padx=5, pady=5, sticky="w")
 
         # 번역 프롬프트 (EBTG - XHTML 생성용, BTG - 일반 텍스트 번역용)
@@ -337,14 +385,17 @@ class EbtgGui:
         
         ttk.Label(prompt_frame, text="EBTG XHTML 생성 프롬프트:").pack(anchor=tk.W)
         self.ebtg_xhtml_prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=6, width=70)
+        Tooltip(self.ebtg_xhtml_prompt_text, "EBTG가 전체 XHTML 문서를 생성하도록 API에 지시할 때 사용되는 기본 프롬프트입니다.")
         self.ebtg_xhtml_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
         
         ttk.Label(prompt_frame, text="EBTG XHTML 조각 생성 프롬프트:").pack(anchor=tk.W)
         self.ebtg_xhtml_fragment_prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=6, width=70)
+        Tooltip(self.ebtg_xhtml_fragment_prompt_text, "EBTG가 XHTML 문서의 일부 조각(fragment)을 생성하도록 API에 지시할 때 사용되는 프롬프트입니다.\n'{overall_task_description}' 부분은 전체 문서 생성 프롬프트로 대체됩니다.")
         self.ebtg_xhtml_fragment_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
 
         ttk.Label(prompt_frame, text="BTG 일반 텍스트 프롬프트:").pack(anchor=tk.W)
         self.btg_text_prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=6, width=70)
+        Tooltip(self.btg_text_prompt_text, "BTG 모듈이 일반 텍스트를 번역할 때 사용하는 프롬프트입니다.\n(로어북 추출 등 내부적으로 사용)")
         self.btg_text_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
 
         # 콘텐츠 안전 재시도 설정 (BTG Module)
@@ -352,12 +403,15 @@ class EbtgGui:
         content_safety_frame.pack(fill="x", padx=5, pady=5)
         self.btg_use_content_safety_retry_var = tk.BooleanVar()
         self.btg_use_content_safety_retry_check = ttk.Checkbutton(content_safety_frame, text="검열 오류시 청크 분할 재시도 사용", variable=self.btg_use_content_safety_retry_var)
+        Tooltip(self.btg_use_content_safety_retry_check, "API가 콘텐츠 안전 문제로 응답을 거부할 경우, 텍스트를 더 작게 나누어 재시도할지 여부입니다.")
         self.btg_use_content_safety_retry_check.grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(content_safety_frame, text="최대 분할 시도:").grid(row=1, column=0, sticky="w")
         self.btg_max_split_attempts_entry = ttk.Entry(content_safety_frame, width=5)
+        Tooltip(self.btg_max_split_attempts_entry, "콘텐츠 안전 문제 발생 시, 텍스트를 나누어 재시도할 최대 횟수입니다. (기본값: 3)")
         self.btg_max_split_attempts_entry.grid(row=1, column=1, sticky="w")
         ttk.Label(content_safety_frame, text="최소 청크 크기:").grid(row=2, column=0, sticky="w")
         self.btg_min_chunk_size_entry = ttk.Entry(content_safety_frame, width=10)
+        Tooltip(self.btg_min_chunk_size_entry, "콘텐츠 안전 문제로 텍스트를 나눌 때, 허용되는 최소 글자 수입니다. (기본값: 100)")
         self.btg_min_chunk_size_entry.grid(row=2, column=1, sticky="w")
 
         # 동적 로어북 주입 설정 (BTG Module)
@@ -365,23 +419,29 @@ class EbtgGui:
         dyn_lorebook_frame.pack(fill="x", padx=5, pady=5)
         self.btg_enable_dynamic_lorebook_var = tk.BooleanVar()
         self.btg_enable_dynamic_lorebook_check = ttk.Checkbutton(dyn_lorebook_frame, text="동적 로어북 주입 활성화", variable=self.btg_enable_dynamic_lorebook_var)
+        Tooltip(self.btg_enable_dynamic_lorebook_check, "번역 시 로어북(용어집)의 내용을 동적으로 프롬프트에 주입할지 여부입니다.")
         self.btg_enable_dynamic_lorebook_check.grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(dyn_lorebook_frame, text="청크당 최대 주입 항목 수:").grid(row=1, column=0, sticky="w")
         self.btg_max_lorebook_entries_injection_entry = ttk.Entry(dyn_lorebook_frame, width=5)
+        Tooltip(self.btg_max_lorebook_entries_injection_entry, "하나의 번역 요청(청크)에 주입될 로어북 항목의 최대 개수입니다. (기본값: 3)")
         self.btg_max_lorebook_entries_injection_entry.grid(row=1, column=1, sticky="w")
         ttk.Label(dyn_lorebook_frame, text="청크당 최대 주입 문자 수:").grid(row=2, column=0, sticky="w")
         self.btg_max_lorebook_chars_injection_entry = ttk.Entry(dyn_lorebook_frame, width=10)
+        Tooltip(self.btg_max_lorebook_chars_injection_entry, "하나의 번역 요청(청크)에 주입될 로어북 내용의 최대 글자 수입니다. (기본값: 500)")
         self.btg_max_lorebook_chars_injection_entry.grid(row=2, column=1, sticky="w")
 
         # 설정 저장/로드 버튼
         action_frame = ttk.Frame(settings_frame, padding="10")
         action_frame.pack(fill="x", padx=5, pady=10) # type: ignore
         self.save_settings_button = ttk.Button(action_frame, text="EBTG 설정 저장", command=self._save_ebtg_settings) # type: ignore
+        Tooltip(self.save_settings_button, "현재 탭의 모든 설정을 EBTG 설정 파일(ebtg_config.json)에 저장합니다.")
         self.save_settings_button.pack(side="left", padx=5)
         self.load_settings_button = ttk.Button(action_frame, text="EBTG 설정 불러오기", command=self._load_ebtg_settings_to_ui) # type: ignore
+        Tooltip(self.load_settings_button, "EBTG 설정 파일(ebtg_config.json)에서 설정을 불러와 현재 UI에 적용합니다.")
         self.load_settings_button.pack(side="left", padx=5)
 
         self._toggle_vertex_fields() # Initial state
+        Tooltip(settings_frame, "번역 작업과 관련된 다양한 설정을 변경합니다.\nEBTG 자체 설정과 내부적으로 사용되는 BTG 모듈의 설정을 포함합니다.")
 
     def _create_lorebook_management_widgets(self, parent_frame):
         # 로어북 JSON 파일 설정
@@ -391,13 +451,17 @@ class EbtgGui:
         ttk.Label(path_frame, text="JSON 파일 경로:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.btg_lorebook_json_path_entry = ttk.Entry(path_frame, width=50)
         self.btg_lorebook_json_path_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        Tooltip(self.btg_lorebook_json_path_entry, "BTG 모듈이 사용할 로어북(용어집) JSON 파일의 경로입니다.\n동적 로어북 주입 또는 로어북 기반 번역에 사용됩니다.")
         self.btg_browse_lorebook_json_button = ttk.Button(path_frame, text="찾아보기", command=self._browse_btg_lorebook_json_file)
         self.btg_browse_lorebook_json_button.grid(row=0, column=2, padx=5, pady=5)
+        Tooltip(self.btg_browse_lorebook_json_button, "로어북 JSON 파일을 선택합니다.")
 
         extract_button = ttk.Button(path_frame, text="현재 EPUB에서 로어북 추출 (BTG Module)", command=self._extract_lorebook_from_epub_thread)
         extract_button.grid(row=1, column=0, columnspan=3, padx=5, pady=10)
+        Tooltip(extract_button, "'EPUB 번역' 탭에서 선택된 입력 EPUB 파일의 내용을 기반으로 로어북을 자동으로 추출합니다.\n추출된 로어북은 아래에 표시되며, 지정된 경로에 저장됩니다.")
 
         self.btg_lorebook_progress_label = ttk.Label(path_frame, text="로어북 추출 대기 중...")
+        Tooltip(self.btg_lorebook_progress_label, "로어북 추출 작업의 진행 상태를 표시합니다.")
         self.btg_lorebook_progress_label.grid(row=2, column=0, columnspan=3, padx=5, pady=2)
 
         # 로어북 추출 설정 프레임
@@ -408,17 +472,20 @@ class EbtgGui:
         sample_ratio_frame = ttk.Frame(extraction_settings_frame)
         sample_ratio_frame.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
         self.btg_sample_ratio_scale = ttk.Scale(sample_ratio_frame, from_=5.0, to=100.0, orient="horizontal", length=200, command=lambda v: self.btg_sample_ratio_label.config(text=f"{float(v):.1f}%"))
+        Tooltip(self.btg_sample_ratio_scale, "로어북 추출 시 원본 텍스트에서 샘플링할 비율입니다.\n100%면 전체 텍스트를 사용합니다. (기본값: 25.0%)")
         self.btg_sample_ratio_scale.pack(side="left", padx=(0,10))
         self.btg_sample_ratio_label = ttk.Label(sample_ratio_frame, text="25.0%", width=8)
         self.btg_sample_ratio_label.pack(side="left")
 
         ttk.Label(extraction_settings_frame, text="세그먼트 당 최대 항목 수:").grid(row=1, column=0, padx=5, pady=(15,5), sticky="w")
         self.btg_max_entries_per_segment_spinbox = ttk.Spinbox(extraction_settings_frame, from_=1, to=20, width=8)
+        Tooltip(self.btg_max_entries_per_segment_spinbox, "로어북 추출 시, API에 한 번에 요청할 텍스트 조각(세그먼트)에서 추출할 최대 항목 수입니다. (기본값: 5)")
         self.btg_max_entries_per_segment_spinbox.grid(row=1, column=1, padx=5, pady=(15,5), sticky="w")
         self.btg_max_entries_per_segment_spinbox.set("5")
 
         ttk.Label(extraction_settings_frame, text="추출 온도:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.btg_extraction_temp_scale = ttk.Scale(extraction_settings_frame, from_=0.0, to=1.0, orient="horizontal", length=150, command=lambda v: self.btg_extraction_temp_label.config(text=f"{float(v):.2f}"))
+        Tooltip(self.btg_extraction_temp_scale, "로어북 항목 추출 시 모델 응답의 무작위성입니다. 낮을수록 일관된 항목 추출. (기본값: 0.2)")
         self.btg_extraction_temp_scale.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
         self.btg_extraction_temp_label = ttk.Label(extraction_settings_frame, text="0.20", width=6)
         self.btg_extraction_temp_label.grid(row=2, column=2, padx=5, pady=5)
@@ -426,43 +493,51 @@ class EbtgGui:
         # Additional Lorebook settings from BTG GUI
         ttk.Label(extraction_settings_frame, text="샘플링 방식:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
         self.btg_lorebook_sampling_method_combobox = ttk.Combobox(extraction_settings_frame, values=["uniform", "random"], width=15)
+        Tooltip(self.btg_lorebook_sampling_method_combobox, "로어북 추출을 위해 원본 텍스트에서 내용을 샘플링하는 방식입니다.\nuniform: 균일 간격, random: 무작위 (기본값: uniform)")
         self.btg_lorebook_sampling_method_combobox.grid(row=3, column=1, padx=5, pady=5, sticky="w")
         self.btg_lorebook_sampling_method_combobox.set("uniform")
 
         ttk.Label(extraction_settings_frame, text="항목 당 최대 글자 수:").grid(row=4, column=0, padx=5, pady=5, sticky="w")
         self.btg_lorebook_max_chars_entry = ttk.Entry(extraction_settings_frame, width=10)
+        Tooltip(self.btg_lorebook_max_chars_entry, "추출된 각 로어북 항목(용어 및 설명)의 최대 글자 수입니다. (기본값: 200)")
         self.btg_lorebook_max_chars_entry.grid(row=4, column=1, padx=5, pady=5, sticky="w")
         self.btg_lorebook_max_chars_entry.insert(0, "200")
 
         ttk.Label(extraction_settings_frame, text="키워드 민감도:").grid(row=5, column=0, padx=5, pady=5, sticky="w")
         self.btg_lorebook_keyword_sensitivity_combobox = ttk.Combobox(extraction_settings_frame, values=["low", "medium", "high"], width=15)
+        Tooltip(self.btg_lorebook_keyword_sensitivity_combobox, "로어북 항목 추출 시 키워드(등장인물, 지명 등)를 얼마나 민감하게 감지할지 설정합니다. (기본값: medium)")
         self.btg_lorebook_keyword_sensitivity_combobox.grid(row=5, column=1, padx=5, pady=5, sticky="w")
         self.btg_lorebook_keyword_sensitivity_combobox.set("medium")
 
         ttk.Label(extraction_settings_frame, text="로어북 세그먼트 크기:").grid(row=6, column=0, padx=5, pady=5, sticky="w")
         self.btg_lorebook_chunk_size_entry = ttk.Entry(extraction_settings_frame, width=10)
+        Tooltip(self.btg_lorebook_chunk_size_entry, "로어북 추출을 위해 API에 한 번에 전달하는 텍스트의 최대 글자 수입니다. (기본값: 8000)")
         self.btg_lorebook_chunk_size_entry.grid(row=6, column=1, padx=5, pady=5, sticky="w")
         self.btg_lorebook_chunk_size_entry.insert(0, "8000")
 
         ttk.Label(extraction_settings_frame, text="우선순위 설정 (JSON):").grid(row=7, column=0, padx=5, pady=5, sticky="nw")
         self.btg_lorebook_priority_text = scrolledtext.ScrolledText(extraction_settings_frame, width=40, height=3, wrap=tk.WORD)
+        Tooltip(self.btg_lorebook_priority_text, "로어북 항목 유형별 우선순위를 JSON 형식으로 설정합니다.\n높은 숫자일수록 우선순위가 높습니다. (예: {\"character\": 5, \"worldview\": 3})")
         self.btg_lorebook_priority_text.grid(row=7, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
         self.btg_lorebook_priority_text.insert('1.0', json.dumps({"character": 5, "worldview": 5, "story_element": 5}, indent=2))
+        Tooltip(extraction_settings_frame, "EPUB에서 로어북(용어집)을 추출할 때 사용되는 상세 설정입니다.")
 
         # 동적 로어북 주입 설정 (BTG Module - 로어북 관리 탭으로 이동)
         dyn_lorebook_frame_in_lorebook_tab = ttk.LabelFrame(parent_frame, text="동적 로어북 주입 설정 (BTG Module)", padding="10")
         dyn_lorebook_frame_in_lorebook_tab.pack(fill="x", padx=5, pady=5)
-        # Note: These are the same variables as in _create_settings_tab_widgets, ensure they are distinct if needed
-        # For now, assuming these are for BTG module's dynamic lorebook injection, controlled from this tab.
         self.btg_dyn_lb_enable_var_loretab = tk.BooleanVar() # Use distinct var name
         self.btg_dyn_lb_enable_check_loretab = ttk.Checkbutton(dyn_lorebook_frame_in_lorebook_tab, text="동적 로어북 주입 활성화", variable=self.btg_dyn_lb_enable_var_loretab)
+        Tooltip(self.btg_dyn_lb_enable_check_loretab, "번역 시 로어북(용어집)의 내용을 동적으로 프롬프트에 주입할지 여부입니다.\n이 설정은 '번역 설정' 탭의 동일한 설정과 연동됩니다.")
         self.btg_dyn_lb_enable_check_loretab.grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(dyn_lorebook_frame_in_lorebook_tab, text="청크당 최대 주입 항목 수:").grid(row=1, column=0, sticky="w")
         self.btg_dyn_lb_max_entries_entry_loretab = ttk.Entry(dyn_lorebook_frame_in_lorebook_tab, width=5)
+        Tooltip(self.btg_dyn_lb_max_entries_entry_loretab, "하나의 번역 요청(청크)에 주입될 로어북 항목의 최대 개수입니다. (기본값: 3)\n'번역 설정' 탭과 연동됩니다.")
         self.btg_dyn_lb_max_entries_entry_loretab.grid(row=1, column=1, sticky="w")
         ttk.Label(dyn_lorebook_frame_in_lorebook_tab, text="청크당 최대 주입 문자 수:").grid(row=2, column=0, sticky="w")
         self.btg_dyn_lb_max_chars_entry_loretab = ttk.Entry(dyn_lorebook_frame_in_lorebook_tab, width=10)
+        Tooltip(self.btg_dyn_lb_max_chars_entry_loretab, "하나의 번역 요청(청크)에 주입될 로어북 내용의 최대 글자 수입니다. (기본값: 500)\n'번역 설정' 탭과 연동됩니다.")
         self.btg_dyn_lb_max_chars_entry_loretab.grid(row=2, column=1, sticky="w")
+        Tooltip(dyn_lorebook_frame_in_lorebook_tab, "번역 시 로어북 내용을 프롬프트에 동적으로 포함시키는 것에 대한 설정입니다.")
 
         # 로어북 표시/관리
         lorebook_display_frame = ttk.LabelFrame(parent_frame, text="추출된 로어북 (JSON)", padding="10")
@@ -473,16 +548,21 @@ class EbtgGui:
         lorebook_display_buttons_frame = ttk.Frame(lorebook_display_frame)
         lorebook_display_buttons_frame.pack(fill="x", pady=5)
         self.btg_load_lorebook_button = ttk.Button(lorebook_display_buttons_frame, text="로어북 불러오기", command=self._load_btg_lorebook_to_display)
+        Tooltip(self.btg_load_lorebook_button, "컴퓨터에 저장된 로어북 JSON 파일을 불러와 아래 텍스트 영역에 표시합니다.")
         self.btg_load_lorebook_button.pack(side="left", padx=5)
         self.btg_copy_lorebook_button = ttk.Button(lorebook_display_buttons_frame, text="JSON 복사", command=self._copy_btg_lorebook_json)
+        Tooltip(self.btg_copy_lorebook_button, "아래 텍스트 영역에 표시된 로어북 JSON 내용을 클립보드에 복사합니다.")
         self.btg_copy_lorebook_button.pack(side="left", padx=5)
         self.btg_save_displayed_lorebook_button = ttk.Button(lorebook_display_buttons_frame, text="JSON 저장", command=self._save_displayed_btg_lorebook_json)
+        Tooltip(self.btg_save_displayed_lorebook_button, "아래 텍스트 영역에 표시된 로어북 JSON 내용을 새 파일로 저장합니다.")
         self.btg_save_displayed_lorebook_button.pack(side="left", padx=5)
+        Tooltip(lorebook_display_frame, "추출되거나 불러온 로어북의 내용을 JSON 형식으로 보여줍니다.\n여기서 직접 편집은 불가능하며, 편집 후 저장하려면 외부 편집기를 사용하세요.")
 
         # 로어북 설정 저장/초기화 버튼 (EBTG 설정 파일에 BTG 로어북 관련 설정을 저장)
         lorebook_action_frame = ttk.Frame(parent_frame, padding="10")
         lorebook_action_frame.pack(fill="x", padx=5, pady=5)
         self.save_btg_lorebook_settings_button = ttk.Button(lorebook_action_frame, text="로어북 관련 설정 저장 (EBTG Config)", command=self._save_ebtg_settings) # Saves all settings including these
+        Tooltip(self.save_btg_lorebook_settings_button, "이 탭의 로어북 추출 및 주입 관련 설정을 포함한 모든 EBTG 설정을 저장합니다.\n('번역 설정' 탭의 저장 버튼과 동일 기능)")
         self.save_btg_lorebook_settings_button.pack(side="left", padx=5)
         # Preview and Reset might need more specific logic if they only affect BTG part of config
         # For now, they can be placeholders or trigger full EBTG config reset/preview if simpler.
@@ -490,6 +570,7 @@ class EbtgGui:
         # self.reset_btg_lorebook_settings_button.pack(side="left", padx=5)
         # self.preview_btg_lorebook_settings_button = ttk.Button(lorebook_action_frame, text="설정 미리보기", command=self._preview_btg_lorebook_settings)
         # self.preview_btg_lorebook_settings_button.pack(side="right", padx=5)
+        Tooltip(parent_frame, "EPUB에서 용어집(로어북)을 추출하고 관리하는 기능입니다.\n추출된 로어북은 번역 품질 향상에 사용될 수 있습니다.")
 
     def _create_log_widgets(self, parent_frame):
         self.log_text = scrolledtext.ScrolledText(parent_frame, wrap=tk.WORD, state=tk.DISABLED, height=15)
@@ -613,10 +694,10 @@ class EbtgGui:
         config_data["prompt_instructions_for_xhtml_generation"] = self.ebtg_xhtml_prompt_text.get("1.0", tk.END).strip()
         config_data["prompt_instructions_for_xhtml_fragment_generation"] = self.ebtg_xhtml_fragment_prompt_text.get("1.0", tk.END).strip()
         try: # 새 파라미터 읽기
-            config_data["xhtml_segment_target_chars"] = int(self.ebtg_xhtml_segment_target_chars_entry.get() or "15000")
+            config_data["xhtml_segment_target_chars"] = int(self.ebtg_xhtml_segment_target_chars_entry.get() or "4000")
         except ValueError:
-            config_data["xhtml_segment_target_chars"] = 15000 # 기본값
-            messagebox.showwarning("입력 오류", "EBTG XHTML 세그먼트 목표 문자 수는 숫자여야 합니다. 기본값(15000)으로 설정됩니다.")
+            config_data["xhtml_segment_target_chars"] = 4000 # 기본값
+            messagebox.showwarning("입력 오류", "EBTG XHTML 세그먼트 목표 문자 수는 숫자여야 합니다. 기본값(4000)으로 설정됩니다.")
         
         # BTG module related settings (to be stored in ebtg_config.json, under a sub-key or flattened)
         # For simplicity, we'll flatten them for now, but a sub-key like "btg_settings" might be cleaner.
@@ -717,7 +798,7 @@ class EbtgGui:
         self.ebtg_xhtml_fragment_prompt_text.delete('1.0', tk.END)
         self.ebtg_xhtml_fragment_prompt_text.insert('1.0', config.get("prompt_instructions_for_xhtml_fragment_generation", ""))
         self.ebtg_xhtml_segment_target_chars_entry.delete(0, tk.END) # 새 파라미터 UI 업데이트
-        self.ebtg_xhtml_segment_target_chars_entry.insert(0, str(config.get("xhtml_segment_target_chars", 15000)))
+        self.ebtg_xhtml_segment_target_chars_entry.insert(0, str(config.get("xhtml_segment_target_chars", 4000)))
 
         # BTG module related settings
         self.api_keys_text.delete('1.0', tk.END)
@@ -726,9 +807,9 @@ class EbtgGui:
         self.service_account_file_entry.delete(0, tk.END) 
         self.service_account_file_entry.insert(0, config.get("service_account_file_path") or "") # Ensure string
         self.gcp_project_entry.delete(0, tk.END)
-        self.gcp_project_entry.insert(0, config.get("gcp_project", ""))
+        self.gcp_project_entry.insert(0, config.get("gcp_project") or "") # Applied similar pattern
         self.gcp_location_entry.delete(0, tk.END)
-        self.gcp_location_entry.insert(0, config.get("gcp_location", ""))
+        self.gcp_location_entry.insert(0, config.get("gcp_location") or "") # Applied similar pattern
         self.model_name_combobox.set(config.get("model_name", "gemini-2.0-flash"))
         
         try: self.temperature_scale.set(float(config.get("temperature", 0.7)))

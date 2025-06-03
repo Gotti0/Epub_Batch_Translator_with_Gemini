@@ -29,7 +29,7 @@ class EbtgConfigManager:
             ),
             "btg_config_path": None, # Path to btg_module's config.json, or None to use BTG's default
             # "content_segmentation_max_items": 0, # Replaced by xhtml_segment_target_chars
-            "xhtml_segment_target_chars": 15000, # Target character length for XHTML content items per segment. 0 or negative means no char-based segmentation.
+            "xhtml_segment_target_chars": 4000, # Target character length for XHTML content items per segment. 0 or negative means no char-based segmentation.
             "perform_epub_validation": True, # New option to control EPUB validation
             "perform_content_omission_check": True # New option for content omission check
      }
