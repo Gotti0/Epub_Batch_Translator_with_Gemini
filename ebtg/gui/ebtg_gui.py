@@ -562,23 +562,6 @@ class EbtgGui:
         self.btg_lorebook_priority_text.insert('1.0', json.dumps({"character": 5, "worldview": 5, "story_element": 5}, indent=2))
         Tooltip(extraction_settings_frame, "EPUB에서 로어북(용어집)을 추출할 때 사용되는 상세 설정입니다.")
 
-        # 동적 로어북 주입 설정 (BTG Module - 로어북 관리 탭으로 이동)
-        dyn_lorebook_frame_in_lorebook_tab = ttk.LabelFrame(parent_frame, text="동적 로어북 주입 설정 (BTG Module)", padding="10")
-        dyn_lorebook_frame_in_lorebook_tab.pack(fill="x", padx=5, pady=5)
-        self.btg_dyn_lb_enable_var_loretab = tk.BooleanVar() # Use distinct var name
-        self.btg_dyn_lb_enable_check_loretab = ttk.Checkbutton(dyn_lorebook_frame_in_lorebook_tab, text="동적 로어북 주입 활성화", variable=self.btg_dyn_lb_enable_var_loretab)
-        Tooltip(self.btg_dyn_lb_enable_check_loretab, "번역 시 로어북(용어집)의 내용을 동적으로 프롬프트에 주입할지 여부입니다.\n이 설정은 '번역 설정' 탭의 동일한 설정과 연동됩니다.")
-        self.btg_dyn_lb_enable_check_loretab.grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(dyn_lorebook_frame_in_lorebook_tab, text="청크당 최대 주입 항목 수:").grid(row=1, column=0, sticky="w")
-        self.btg_dyn_lb_max_entries_entry_loretab = ttk.Entry(dyn_lorebook_frame_in_lorebook_tab, width=5)
-        Tooltip(self.btg_dyn_lb_max_entries_entry_loretab, "하나의 번역 요청(청크)에 주입될 로어북 항목의 최대 개수입니다. (기본값: 3)\n'번역 설정' 탭과 연동됩니다.")
-        self.btg_dyn_lb_max_entries_entry_loretab.grid(row=1, column=1, sticky="w")
-        ttk.Label(dyn_lorebook_frame_in_lorebook_tab, text="청크당 최대 주입 문자 수:").grid(row=2, column=0, sticky="w")
-        self.btg_dyn_lb_max_chars_entry_loretab = ttk.Entry(dyn_lorebook_frame_in_lorebook_tab, width=10)
-        Tooltip(self.btg_dyn_lb_max_chars_entry_loretab, "하나의 번역 요청(청크)에 주입될 로어북 내용의 최대 글자 수입니다. (기본값: 500)\n'번역 설정' 탭과 연동됩니다.")
-        self.btg_dyn_lb_max_chars_entry_loretab.grid(row=2, column=1, sticky="w")
-        Tooltip(dyn_lorebook_frame_in_lorebook_tab, "번역 시 로어북 내용을 프롬프트에 동적으로 포함시키는 것에 대한 설정입니다.")
-
         # 로어북 표시/관리
         lorebook_display_frame = ttk.LabelFrame(parent_frame, text="추출된 로어북 (JSON)", padding="10")
         lorebook_display_frame.pack(fill="both", expand=True, padx=5, pady=5)
@@ -799,13 +782,7 @@ class EbtgGui:
         btg_config["lorebook_chunk_size"] = int(self.btg_lorebook_chunk_size_entry.get() or "8000")
         try: btg_config["lorebook_priority_settings"] = json.loads(self.btg_lorebook_priority_text.get("1.0", tk.END).strip() or "{}")
         except json.JSONDecodeError: btg_config["lorebook_priority_settings"] = {"character": 5, "worldview": 5, "story_element": 5}
-        # Dynamic lorebook injection settings from Lorebook Tab (if they are distinct)
-        btg_config["enable_dynamic_lorebook_injection"] = self.btg_dyn_lb_enable_var_loretab.get() # From lorebook tab
-        try: btg_config["max_lorebook_entries_per_chunk_injection"] = int(self.btg_dyn_lb_max_entries_entry_loretab.get() or "3")
-        except ValueError: btg_config["max_lorebook_entries_per_chunk_injection"] = 3 # Default if empty/invalid
-        try: btg_config["max_lorebook_chars_per_chunk_injection"] = int(self.btg_dyn_lb_max_chars_entry_loretab.get() or "500")
-        except ValueError: btg_config["max_lorebook_chars_per_chunk_injection"] = 500
-        
+
         return btg_config
 
     def _save_ebtg_settings(self):
@@ -901,13 +878,6 @@ class EbtgGui:
         self.btg_lorebook_priority_text.delete('1.0', tk.END)
         self.btg_lorebook_priority_text.insert('1.0', json.dumps(config.get("lorebook_priority_settings", {"character": 5, "worldview": 5, "story_element": 5}), indent=2))
         
-        # Load dynamic lorebook injection settings on the Lorebook tab
-        self.btg_dyn_lb_enable_var_loretab.set(config.get("enable_dynamic_lorebook_injection", False))
-        self.btg_dyn_lb_max_entries_entry_loretab.delete(0, tk.END)
-        self.btg_dyn_lb_max_entries_entry_loretab.insert(0, str(config.get("max_lorebook_entries_per_chunk_injection", 3)))
-        self.btg_dyn_lb_max_chars_entry_loretab.delete(0, tk.END)
-        self.btg_dyn_lb_max_chars_entry_loretab.insert(0, str(config.get("max_lorebook_chars_per_chunk_injection", 500)))
-
         self._toggle_vertex_fields() # Update UI state based on loaded config
         logging.getLogger(__name__).info("EBTG 설정 UI에 로드 완료.")
 
