@@ -986,7 +986,7 @@ class EbtgGui:
             daemon=True
         )
         self.translation_thread.start()
-            self._start_periodic_time_update() # 주기적 시간 업데이트 시작
+        self._start_periodic_time_update() # 주기적 시간 업데이트 시작
 
     def _start_periodic_time_update(self):
         if not self.root.winfo_exists():
