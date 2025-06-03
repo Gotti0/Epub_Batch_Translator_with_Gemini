@@ -29,6 +29,10 @@ from btg_module.file_handler import read_json_file as btg_read_json_file # To av
 from collections import defaultdict
 from .ebtg_dtos import TranslateTextChunksRequestDto, TranslateTextChunksResponseDto
 
+# Define a unique separator for merging text chunks
+EBTG_MERGE_SEPARATOR = "\n<EBTG_TEXT_SEPARATOR_DO_NOT_TRANSLATE_THIS_TAG/>\n"
+
+
 @dataclass
 class SegmentProcessingTask:
     xhtml_item_id: Any
@@ -460,6 +464,16 @@ class EbtgAppService:
             # prompt_template은 이미 target_language와 lorebook_context가 채워져 있고 {{slot}}만 남은 상태입니다.
             final_prompt_for_api = prompt_template.replace("{{slot}}", chunk_text)
             prompt_char_count = len(final_prompt_for_api)
+            # Add instruction for handling merged chunks if separator is present
+            if EBTG_MERGE_SEPARATOR in chunk_text:
+                merge_handling_instruction = (
+                    "\n\nIMPORTANT: The text to translate above may contain multiple distinct pieces separated by "
+                    f"'{EBTG_MERGE_SEPARATOR}'. Translate each piece independently. In your XHTML output, "
+                    f"ensure the translations of these pieces are also separated by the exact string '{EBTG_MERGE_SEPARATOR}' "
+                    "between their respective paragraph tags (e.g., <p>Translated Piece 1</p>"
+                    f"{EBTG_MERGE_SEPARATOR}<p>Translated Piece 2</p>)."
+                )
+                final_prompt_for_api = final_prompt_for_api.replace("{{slot}}", chunk_text + merge_handling_instruction, 1)
             logger.debug(f"API 호출 프롬프트 문자 수 (청크 {chunk_idx}): {prompt_char_count}자. 내용 (앞 100자): {final_prompt_for_api[:100]}...")
 
             translated_fragment = self.btg_integration.translate_single_text_chunk_to_xhtml_fragment(
@@ -654,33 +668,52 @@ class EbtgAppService:
                         self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "kept_original_no_translatable_text")
                         generated_xhtml_for_item_successfully = True # Considered "successful"
                         continue
+                        
+                    # --- NEW: Merge texts in texts_for_translation_for_item ---
+                    merged_texts_for_btg: List[str] = []
+                    # source_map_for_merged_texts maps index in merged_texts_for_btg
+                    # to a list of original indices from texts_for_translation_for_item
+                    source_map_for_merged_texts: List[List[int]] = []
 
-                    # Chunk the texts
-                    # Revised chunking logic:
-                    text_chunks_for_btg: List[str] = []
-                    # Map: index of original item in texts_for_translation_for_item -> list of chunk indices in text_chunks_for_btg
-                    source_text_item_to_btg_chunks_map: Dict[int, List[int]] = defaultdict(list)
-                    
-                    # text_chunk_target_chars = self.config.get("text_chunk_target_chars", 3000) # Replaced by segment_char_limit
-                    
-                    current_btg_chunk_idx = 0
+                    current_merged_parts_texts: List[str] = []
+                    current_merged_parts_original_indices: List[int] = []
+                    current_merged_char_count = 0
+
                     for original_idx, original_text_content in enumerate(texts_for_translation_for_item):
-                        if segment_char_limit > 0 and len(original_text_content) > segment_char_limit:
-                            # This original_text_content (from one TextBlock or one alt) is too long.
-                            # Sub-chunk it. The sub-chunks should be translated individually and then concatenated.
-                            # join_separator="" is important here as we are splitting one semantic unit.
-                            sub_chunks_of_original_item = self._create_text_chunks([original_text_content], segment_char_limit, join_separator="")
-                            for sub_chunk in sub_chunks_of_original_item:
-                                text_chunks_for_btg.append(sub_chunk)
-                                source_text_item_to_btg_chunks_map[original_idx].append(current_btg_chunk_idx)
-                                current_btg_chunk_idx += 1
-                        else:
-                            # This original_text_content is short enough or no char limit.
-                            text_chunks_for_btg.append(original_text_content)
-                            source_text_item_to_btg_chunks_map[original_idx].append(current_btg_chunk_idx)
-                            current_btg_chunk_idx += 1
-                    logger.info(f"[{item_filename}] Created {len(text_chunks_for_btg)} text chunks for BTG from {len(texts_for_translation_for_item)} original text items.")
+                        if not original_text_content.strip(): # Skip empty original texts
+                            continue
 
+                        # If current_merged_parts_texts is not empty and adding the new text (plus separator)
+                        # would exceed the limit, finalize the current merged chunk.
+                        if current_merged_parts_texts and \
+                           (current_merged_char_count + len(EBTG_MERGE_SEPARATOR) + len(original_text_content) > segment_char_limit):
+                            merged_texts_for_btg.append(EBTG_MERGE_SEPARATOR.join(current_merged_parts_texts))
+                            source_map_for_merged_texts.append(list(current_merged_parts_original_indices))
+                            current_merged_parts_texts = []
+                            current_merged_parts_original_indices = []
+                            current_merged_char_count = 0
+
+                        # If a single original_text_content itself is larger than segment_char_limit,
+                        # it forms its own "merged" chunk (or could be further split if needed, but current logic sends as is).
+                        if not current_merged_parts_texts and len(original_text_content) > segment_char_limit:
+                            merged_texts_for_btg.append(original_text_content)
+                            source_map_for_merged_texts.append([original_idx])
+                            # No change to current_merged_parts_texts etc., as this one is processed immediately.
+                        else:
+                            current_merged_parts_texts.append(original_text_content)
+                            current_merged_parts_original_indices.append(original_idx)
+                            current_merged_char_count += len(original_text_content)
+                            if len(current_merged_parts_texts) > 1:
+                                current_merged_char_count += len(EBTG_MERGE_SEPARATOR)
+
+                    if current_merged_parts_texts: # Add any remaining parts
+                        merged_texts_for_btg.append(EBTG_MERGE_SEPARATOR.join(current_merged_parts_texts))
+                        source_map_for_merged_texts.append(list(current_merged_parts_original_indices))
+                    
+                    text_chunks_for_btg = merged_texts_for_btg # Use the merged chunks
+                    logger.info(f"[{item_filename}] Created {len(text_chunks_for_btg)} merged text chunks for BTG from {len(texts_for_translation_for_item)} original text items.")
+
+                    
                     if not text_chunks_for_btg: # Should not happen if texts_for_translation_for_item was not empty
                         logger.warning(f"[{item_filename}] Text chunking resulted in zero chunks. Keeping original content.")
                         self.epub_processor.update_xhtml_content(item_id, original_xhtml_content_str.encode('utf-8'))
@@ -696,13 +729,7 @@ class EbtgAppService:
                         raise EbtgProcessingError("Universal translation prompt is not configured in EBTG settings.")
                     ebtg_lorebook_context_for_item = self._get_relevant_lorebook_context_for_extracted_elements(extracted_elements)
 
-                    # Create request DTO for BtgIntegrationService
-                    translation_request_dto = TranslateTextChunksRequestDto(
-                        text_chunks=text_chunks_for_btg,
-                        target_language=target_language,
-                        prompt_template_for_fragment_generation=prompt_template_for_fragments,
-                        ebtg_lorebook_context=ebtg_lorebook_context_for_item
-                    )
+                    
 
                     logger.info(f"[{item_filename}] Sending {len(text_chunks_for_btg)} text chunks to BtgIntegrationService for translation and fragment generation.")
                     
@@ -711,7 +738,8 @@ class EbtgAppService:
                     try:
                         # --- Parallelized Text Chunk Translation ---
                         max_workers_for_ebtg = self.config.get("max_workers", 4) # Use the same max_workers as for BTG
-                        translated_fragments_map: Dict[int, str] = {}
+                        # translated_fragments_map maps index in text_chunks_for_btg (merged_texts_for_btg) to translated fragment
+                        translated_merged_fragments_map: Dict[int, str] = {}
                         chunk_translation_errors: List[str] = []
 
                         with ThreadPoolExecutor(max_workers=max_workers_for_ebtg) as executor:
@@ -730,64 +758,65 @@ class EbtgAppService:
                             for future in as_completed(future_to_chunk_idx):
                                 original_chunk_idx = future_to_chunk_idx[future]
                                 try:
-                                    _c_idx, translated_frag, error = future.result()
-                                    translated_fragments_map[original_chunk_idx] = translated_frag
+                                    _c_idx, translated_merged_frag, error = future.result()
+                                    translated_merged_fragments_map[original_chunk_idx] = translated_merged_frag
                                     if error:
                                         chunk_translation_errors.append(f"Chunk {original_chunk_idx}: {error}")
                                 except Exception as exc:
                                     logger.error(f"Error processing future for chunk {original_chunk_idx}: {exc}")
-                                    translated_fragments_map[original_chunk_idx] = f"<p>[Chunk {original_chunk_idx} Processing Error: {exc}]</p>"
+                                    translated_merged_fragments_map[original_chunk_idx] = f"<p>[Merged Chunk {original_chunk_idx} Processing Error: {exc}]</p>"
                                     chunk_translation_errors.append(f"Chunk {original_chunk_idx} (Future): {exc}")
                         
                         if chunk_translation_errors:
                             logger.error(f"[{item_filename}] Errors encountered during parallel text chunk translation. Errors: {chunk_translation_errors}. Using fallback.")
                             raise EbtgProcessingError(f"Failed to translate one or more text chunks for {item_filename}.")
 
-                        # Ensure fragments are in order
-                        ordered_translated_fragments = [translated_fragments_map[i] for i in range(len(text_chunks_for_btg))]
-                        # --- End Parallelized Text Chunk Translation ---
-                        
-                        # --- Phase 5: Reassembly ---
-                        logger.info(f"[{item_filename}] Starting Phase 5: EPUB Reassembly.")
-                        
-                        
-                        # Refined Reassembly Logic:
-                        # Iterate through original `texts_for_translation_for_item` and use `source_text_item_to_btg_chunks_map`
-                        # to combine the `ordered_translated_fragments`.
-                        reconstructed_original_item_translations: List[str] = []
-                        for original_item_idx in range(len(texts_for_translation_for_item)):
-                            btg_chunk_indices_for_this_original_item = source_text_item_to_btg_chunks_map.get(original_item_idx, [])
-                            if not btg_chunk_indices_for_this_original_item: # Should not happen if map is built correctly
-                                reconstructed_original_item_translations.append(f"<p>[Error: No mapped chunks for original item {original_item_idx}]</p>")
-                                continue
+                        # --- Deconstruct merged fragments and map to original texts ---
+                        final_individual_translations: Dict[int, str] = {} # Maps original_idx from texts_for_translation_for_item to its translated fragment
+
+                        for merged_idx, translated_merged_fragment in translated_merged_fragments_map.items():
+                            original_indices_for_this_merged_chunk = source_map_for_merged_texts[merged_idx]
                             
-                            # Concatenate the translated fragments corresponding to the sub-chunks of this original item.
-                            # The separator used when sub-chunking was "", so direct concatenation is appropriate.
-                            concatenated_translation = "".join(
-                                ordered_translated_fragments[i] for i in btg_chunk_indices_for_this_original_item
-                            )
-                            reconstructed_original_item_translations.append(concatenated_translation)
-                        
+                            # Split the translated_merged_fragment by EBTG_MERGE_SEPARATOR
+                            # The LLM was instructed to preserve this separator.
+                            individual_translated_parts = translated_merged_fragment.split(EBTG_MERGE_SEPARATOR)
+
+                            if len(individual_translated_parts) == len(original_indices_for_this_merged_chunk):
+                                for i, original_text_idx in enumerate(original_indices_for_this_merged_chunk):
+                                    final_individual_translations[original_text_idx] = individual_translated_parts[i].strip()
+                            else:
+                                logger.warning(f"[{item_filename}] Mismatch after splitting translated merged chunk {merged_idx}. Expected {len(original_indices_for_this_merged_chunk)} parts, got {len(individual_translated_parts)}. Fallback for these parts.")
+                                for original_text_idx in original_indices_for_this_merged_chunk:
+                                    final_individual_translations[original_text_idx] = f"<p>[Translation Error - Mismatch in merged chunk {merged_idx}]</p>"
+                        # --- End Parallelized Text Chunk Translation ---
+                                                
                         # Now, use `reconstructed_original_item_translations` for reassembly with `extracted_elements`.
                         reassembled_xhtml_parts = [] # Reset for correct reassembly
-                        translated_item_iter = iter(reconstructed_original_item_translations)
 
+                        current_original_text_idx = 0 # To iterate through final_individual_translations
                         for element in extracted_elements:
                             if isinstance(element, TextBlock):
                                 if element.text_content.strip():
                                     try:
-                                        reassembled_xhtml_parts.append(next(translated_item_iter))
-                                    except StopIteration:
-                                        logger.error(f"[{item_filename}] Reassembly (v2) error: Ran out of translated body fragments.")
+                                        translated_fragment = final_individual_translations.get(current_original_text_idx, f"<p>[Missing Translation for original_text_idx {current_original_text_idx}]</p>")
+                                        reassembled_xhtml_parts.append(translated_fragment)
+                                        current_original_text_idx += 1
+                                    except KeyError: # Should be caught by .get() default
+                                        logger.error(f"[{item_filename}] Reassembly error: Missing translation for original_text_idx {current_original_text_idx}.")
                                         reassembled_xhtml_parts.append(f"<p>[Translation Error for TextBlock]</p>")
                                         files_with_errors += 1
+                                elif not element.text_content.strip(): # Empty text block
+                                    reassembled_xhtml_parts.append("<p></p>") # Or however empty paragraphs should be represented
+
                             elif isinstance(element, ImageInfo):
-                                translated_alt_text = element.original_alt
+                                translated_alt_text = element.original_alt # Default to original if not translated
                                 if element.original_alt and element.original_alt.strip():
                                     try:
-                                        translated_alt_fragment = next(translated_item_iter)
+                                        translated_alt_fragment = final_individual_translations.get(current_original_text_idx, element.original_alt)
+                                        
                                         soup_alt = BeautifulSoup(translated_alt_fragment, 'html.parser')
                                         translated_alt_text = soup_alt.get_text().strip()
+                                        current_original_text_idx += 1
                                     except StopIteration:
                                         logger.error(f"[{item_filename}] Reassembly (v2) error: Ran out of translated alt text fragments.")
                                     except Exception as e_alt_parse:
@@ -804,7 +833,8 @@ class EbtgAppService:
                                     reassembled_xhtml_parts.append(f'<img src="{element.src}" alt="{final_alt_text_for_tag}"/>')
                         
                         final_xhtml_content_str = "\n".join(reassembled_xhtml_parts)
-                        
+                        # --- End: Phase 5 ---
+
                         # Validate and update EPUB content
                         is_valid_xhtml, validation_errors = self.quality_monitor.validate_xhtml_structure(final_xhtml_content_str, item_filename)
                         if not is_valid_xhtml:
