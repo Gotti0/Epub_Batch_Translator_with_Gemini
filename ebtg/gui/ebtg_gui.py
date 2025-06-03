@@ -399,11 +399,7 @@ class EbtgGui:
         processing_frame = ttk.LabelFrame(settings_frame, text="처리 설정 (BTG Module)", padding="10")
         processing_frame.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(processing_frame, text="청크 크기 (BTG):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.btg_chunk_size_entry = ttk.Entry(processing_frame, width=10)
-        Tooltip(self.btg_chunk_size_entry, "BTG 모듈 내부에서 텍스트를 나누어 API에 요청할 때의 최대 글자 수입니다. (기본값: 6000)")
-        self.btg_chunk_size_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        
+        # btg_chunk_size_entry is removed from UI. BTG will use segment_character_limit from EBTG config.
         ttk.Label(processing_frame, text="최대 작업자 수 (BTG):").grid(row=0, column=2, padx=5, pady=5, sticky="w")
         self.btg_max_workers_entry = ttk.Entry(processing_frame, width=5)
         self.btg_max_workers_entry.grid(row=0, column=3, padx=5, pady=5, sticky="w")
@@ -760,8 +756,11 @@ class EbtgGui:
         btg_config["temperature"] = self.temperature_scale.get()
         btg_config["top_p"] = self.top_p_scale.get()
         
-        # btg_chunk_size_entry is removed, BTG will use segment_character_limit from EBTG's config
-        # If BTG runs standalone, it uses its own default for segment_character_limit.
+        # BTG will use the segment_character_limit from EBTG's config when run via EBTG.
+        # This value is taken from ebtg_segment_char_limit_entry in _get_ebtg_config_from_ui
+        # and then passed to btg_app_service.config.
+        # So, we ensure it's part of the btg_config dictionary if needed for direct use by BTG.
+        btg_config["segment_character_limit"] = int(self.ebtg_segment_char_limit_entry.get() or "4000")
         # btg_config["segment_character_limit"] will be set by EBTG config.
         try: btg_config["max_workers"] = int(self.btg_max_workers_entry.get() or "4")
         except ValueError: btg_config["max_workers"] = 4
@@ -850,8 +849,7 @@ class EbtgGui:
         except ValueError: self.top_p_scale.set(0.9)
         self.top_p_label.config(text=f"{self.top_p_scale.get():.2f}")
 
-        # btg_chunk_size_entry is removed from UI. BTG will use segment_character_limit from EBTG config.
-        # No UI element to update for BTG's chunk_size directly in EBTG GUI.
+        # btg_chunk_size_entry UI element and its loading logic are removed.
         self.btg_max_workers_entry.delete(0, tk.END)
         self.btg_max_workers_entry.insert(0, str(config.get("max_workers", 4)))
         self.btg_rpm_entry.delete(0, tk.END)
