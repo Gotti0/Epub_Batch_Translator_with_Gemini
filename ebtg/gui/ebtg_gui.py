@@ -1072,8 +1072,10 @@ class EbtgGui:
                 self.root.after(0, lambda: self.btg_lorebook_progress_label.config(text=f"추출 완료: {result_json_path.name}"))
                 self.root.after(0, lambda: self.btg_lorebook_json_path_entry.insert(0, str(result_json_path))) # Update path entry
                 if result_json_path and result_json_path.exists():
+                    lore_content_to_display: str
                     with open(result_json_path, 'r', encoding='utf-8') as f_res:
-                        self.root.after(0, lambda: self._display_btg_lorebook_content(f_res.read()))
+                        lore_content_to_display = f_res.read() # Read content while file is open
+                    self.root.after(0, lambda content=lore_content_to_display: self._display_btg_lorebook_content(content)) # Pass content to lambda
             except (BtgFileHandlerException, BtgApiClientException, BtgServiceException, BtgBusinessLogicException) as e_btg:
                 logging.getLogger(__name__).error(f"로어북 추출 중 BTG 예외: {e_btg}", exc_info=True)
                 self.root.after(0, lambda exc=e_btg: messagebox.showerror("추출 오류", f"로어북 추출 중 오류: {exc}")) # 이미 한국어
