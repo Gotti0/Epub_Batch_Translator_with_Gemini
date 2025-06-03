@@ -57,7 +57,7 @@ class EpubProcessorService:
                         filename=item.get_name(),
                         item_id=item.get_id(),
                         content_bytes=content,
-                        media_type=item.get_media_type()
+                        media_type=item.media_type
                     )
                 )
         logger.info(f"EPUB opened. Found {len(self._xhtml_items_cache)} XHTML documents and {len(self._other_resources_cache)} other resources.")
@@ -102,7 +102,7 @@ class EpubProcessorService:
         for item in self.book.get_items():
             item_id = item.get_id()
             filename = item.get_name()
-            media_type = item.get_media_type()
+            media_type = item.media_type
             content_to_write = self._item_content_map.get(item_id)
 
             if content_to_write is None:
