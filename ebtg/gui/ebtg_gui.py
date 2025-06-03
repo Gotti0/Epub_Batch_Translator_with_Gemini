@@ -138,16 +138,40 @@ class Tooltip:
     def show_tooltip(self, event=None):
         if self.tooltip_window or not self.text:
             return
-        x, y, _, _ = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 20
+        tooltip_x_final: int
+        tooltip_y_final: int
+
+        # Try to get position from insert cursor
+        insert_bbox = None
+        try:
+            # Check if widget is in a state to provide bbox and is mapped
+            if self.widget.winfo_exists() and self.widget.winfo_ismapped():
+                insert_bbox = self.widget.bbox("insert")
+        except tk.TclError:
+            # Some widgets (like Buttons, Labels) raise TclError for bbox("insert")
+            pass # insert_bbox remains None
+
+        if insert_bbox: # If bbox("insert") returned coordinates
+            cursor_x_rel, cursor_y_rel, _, _ = insert_bbox
+            # Position tooltip relative to the insert cursor, with original offsets
+            tooltip_x_final = self.widget.winfo_rootx() + cursor_x_rel + 25
+            tooltip_y_final = self.widget.winfo_rooty() + cursor_y_rel + 20
+        elif event: # Fallback to mouse event coordinates if insert_bbox is None or failed
+            tooltip_x_final = event.x_root + 15 # Position near mouse pointer
+            tooltip_y_final = event.y_root + 10
+        else: # Absolute fallback (if no event, though <Enter> binding should provide it)
+            tooltip_x_final = self.widget.winfo_rootx() + 20
+            tooltip_y_final = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+
 
         self.tooltip_window = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
+        tw.wm_attributes("-topmost", True) # Attempt to keep tooltip on top
+        tw.wm_geometry(f"+{tooltip_x_final}+{tooltip_y_final}")
+
 
         label = tk.Label(tw, text=self.text, justify=tk.LEFT,
-                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         background="#FFFFE0", relief=tk.SOLID, borderwidth=1, # Standard tooltip color
                          font=("tahoma", "8", "normal"))
         label.pack(ipadx=1)
 
