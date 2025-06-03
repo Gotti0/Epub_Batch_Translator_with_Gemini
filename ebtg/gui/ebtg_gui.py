@@ -398,6 +398,12 @@ class EbtgGui:
         Tooltip(self.btg_text_prompt_text, "BTG 모듈이 일반 텍스트를 번역할 때 사용하는 프롬프트입니다.\n(로어북 추출 등 내부적으로 사용)")
         self.btg_text_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
 
+        ttk.Label(prompt_frame, text="BTG XHTML 생성 최종 프롬프트 템플릿 (BTG Module):").pack(anchor=tk.W, pady=(10,0))
+        self.btg_xhtml_final_prompt_template_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=8, width=70)
+        Tooltip(self.btg_xhtml_final_prompt_template_text, "BTG 모듈이 XHTML을 생성할 때 사용하는 최종 프롬프트의 템플릿입니다.\n플레이스홀더: {prompt_instructions}, {target_language}, {content_items_json_string}")
+        self.btg_xhtml_final_prompt_template_text.pack(fill="both", expand=True, padx=5, pady=2)
+
+
         # 콘텐츠 안전 재시도 설정 (BTG Module)
         content_safety_frame = ttk.LabelFrame(settings_frame, text="콘텐츠 안전 재시도 (BTG Module)", padding="10")
         content_safety_frame.pack(fill="x", padx=5, pady=5)
@@ -703,6 +709,9 @@ class EbtgGui:
         # For simplicity, we'll flatten them for now, but a sub-key like "btg_settings" might be cleaner.
         btg_settings = self._get_btg_config_from_ui()
         config_data.update(btg_settings) # Flatten BTG settings into EBTG config
+        # Ensure the new btg_xhtml_generation_prompt_template is also included
+        # It's already handled by _get_btg_config_from_ui and flattened
+
 
         # Path to btg_config.json (if EBTG is to manage a separate BTG config file)
         # For now, assume EBTG config holds all necessary BTG settings directly.
@@ -758,13 +767,17 @@ class EbtgGui:
         try: btg_config["lorebook_priority_settings"] = json.loads(self.btg_lorebook_priority_text.get("1.0", tk.END).strip() or "{}")
         except json.JSONDecodeError: btg_config["lorebook_priority_settings"] = {"character": 5, "worldview": 5, "story_element": 5}
         # Dynamic lorebook injection settings from Lorebook Tab (if they are distinct)
+        # These should ideally be consistent or one source of truth.
+        # For now, taking from the lorebook tab as it might be more specific.
+        # Consider synchronizing these UI elements or having a single point of control.
         btg_config["enable_dynamic_lorebook_injection"] = self.btg_dyn_lb_enable_var_loretab.get() # From lorebook tab
         try: btg_config["max_lorebook_entries_per_chunk_injection"] = int(self.btg_dyn_lb_max_entries_entry_loretab.get() or "3")
         except ValueError: btg_config["max_lorebook_entries_per_chunk_injection"] = 3 # Default if empty/invalid
         try: btg_config["max_lorebook_chars_per_chunk_injection"] = int(self.btg_dyn_lb_max_chars_entry_loretab.get() or "500")
         except ValueError: btg_config["max_lorebook_chars_per_chunk_injection"] = 500
-        
+        btg_config["xhtml_generation_prompt_template"] = self.btg_xhtml_final_prompt_template_text.get("1.0", tk.END).strip()
         return btg_config
+
 
     def _save_ebtg_settings(self):
         if not self.ebtg_app_service:
@@ -874,6 +887,10 @@ class EbtgGui:
         self.btg_dyn_lb_max_entries_entry_loretab.insert(0, str(config.get("max_lorebook_entries_per_chunk_injection", 3)))
         self.btg_dyn_lb_max_chars_entry_loretab.delete(0, tk.END)
         self.btg_dyn_lb_max_chars_entry_loretab.insert(0, str(config.get("max_lorebook_chars_per_chunk_injection", 500)))
+
+        # Load the new BTG XHTML generation prompt template
+        self.btg_xhtml_final_prompt_template_text.delete('1.0', tk.END)
+        self.btg_xhtml_final_prompt_template_text.insert('1.0', config.get("btg_xhtml_generation_prompt_template", ""))
 
         self._toggle_vertex_fields() # Update UI state based on loaded config
         logging.getLogger(__name__).info("EBTG 설정 UI에 로드 완료.")

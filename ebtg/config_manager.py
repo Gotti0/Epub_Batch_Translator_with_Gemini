@@ -28,6 +28,21 @@ class EbtgConfigManager:
                 "Ensure correct relative order of items. The items are:"
             ),
             "btg_config_path": None, # Path to btg_module's config.json, or None to use BTG's default
+            "btg_xhtml_generation_prompt_template": ( # New key for BTG's XHTML generation prompt
+                "{prompt_instructions}\n\n"
+                "Target language for translation of text elements: {target_language}\n\n"
+                "The content items to be processed into a single XHTML string are provided below as a JSON array.\n"
+                "Each object in the array has a \"type\" ('text' or 'image') and \"data\".\n"
+                "For \"text\" type, \"data\" is the string to be translated.\n"
+                "For \"image\" type, \"data\" is an object with \"src\" (to be preserved) and \"alt\" (to be translated if present).\n\n"
+                "Content Items:\n"
+                "```json\n"
+                "{content_items_json_string}\n"
+                "```\n\n"
+                "Please generate the complete XHTML string based on these items and the instructions.\n"
+                "The response should be a single JSON object containing the key \"translated_xhtml_content\" "
+                "with the generated XHTML string as its value."
+            ),
             # "content_segmentation_max_items": 0, # Replaced by xhtml_segment_target_chars
             "xhtml_segment_target_chars": 4000, # Target character length for XHTML content items per segment. 0 or negative means no char-based segmentation.
             "perform_epub_validation": True, # New option to control EPUB validation

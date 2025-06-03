@@ -126,7 +126,22 @@ class ConfigManager:
             "enable_dynamic_lorebook_injection": False, # EBTG에서는 이 설정을 직접 사용하지 않고, TranslationService가 자체 로어북을 사용.
             "xhtml_generation_max_chars_per_batch": 100000, # XHTML 생성 시 API 요청당 최대 프롬프트 문자 수 (근사치)
             "max_lorebook_entries_per_chunk_injection": 3,
-            "max_lorebook_chars_per_chunk_injection": 500
+            "max_lorebook_chars_per_chunk_injection": 500,
+            "xhtml_generation_prompt_template": ( # EBTG 연동 시 XHTML 생성을 위한 최종 프롬프트 템플릿
+                "{prompt_instructions}\n\n"
+                "Target language for translation of text elements: {target_language}\n\n"
+                "The content items to be processed into a single XHTML string are provided below as a JSON array.\n"
+                "Each object in the array has a \"type\" ('text' or 'image') and \"data\".\n"
+                "For \"text\" type, \"data\" is the string to be translated.\n"
+                "For \"image\" type, \"data\" is an object with \"src\" (to be preserved) and \"alt\" (to be translated if present).\n\n"
+                "Content Items:\n"
+                "```json\n"
+                "{content_items_json_string}\n"
+                "```\n\n"
+                "Please generate the complete XHTML string based on these items and the instructions.\n"
+                "The response should be a single JSON object containing the key \"translated_xhtml_content\" "
+                "with the generated XHTML string as its value."
+            )
         }
 
     def load_config(self, use_default_if_missing: bool = True) -> Dict[str, Any]:

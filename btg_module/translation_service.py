@@ -110,6 +110,23 @@ class TranslationService:
             logger.info("동적 로어북 주입 활성화됨. 로어북 데이터 로드 시도.")
         else:
             logger.info("동적 로어북 주입 비활성화됨. 로어북 컨텍스트 없이 번역합니다.")
+        
+        # XHTML 생성 프롬프트 템플릿 로드
+        # 이 기본값은 btg_module/config_manager.py의 기본값과 일치해야 합니다.
+        default_xhtml_template = (
+            "{prompt_instructions}\n\n"
+            "Target language for translation of text elements: {target_language}\n\n"
+            "The content items to be processed into a single XHTML string are provided below as a JSON array.\n"
+            "Each object in the array has a \"type\" ('text' or 'image') and \"data\".\n"
+            "For \"text\" type, \"data\" is the string to be translated.\n"
+            "For \"image\" type, \"data\" is an object with \"src\" (to be preserved) and \"alt\" (to be translated if present).\n\n"
+            "Content Items:\n"
+            "```json\n{content_items_json_string}\n```\n\n"
+            "Please generate the complete XHTML string based on these items and the instructions.\n"
+            "The response should be a single JSON object containing the key \"translated_xhtml_content\" "
+            "with the generated XHTML string as its value."
+        )
+        self.xhtml_generation_prompt_template = self.config.get("xhtml_generation_prompt_template", default_xhtml_template)
 
     def _load_lorebook_data(self):
         # 통합된 로어북 경로 사용
@@ -452,28 +469,15 @@ class TranslationService:
         except TypeError as e:
             logger.error(f"Error serializing content_items to JSON: {e}. Content items: {content_items}")
             # Fallback or raise error
-            content_items_json_string = str(content_items) # Simple string representation as fallback
+            content_items_json_string = json.dumps(str(content_items)) # Ensure it's a valid JSON string even if content is just stringified
 
-        # Assemble the full prompt
-        # The prompt_instructions should already guide the LLM on how to use the content_items.
-        # We just need to provide the data clearly.
-        full_prompt = f"""{prompt_instructions}
+        # Use the loaded template string
+        full_prompt = self.xhtml_generation_prompt_template.format(
+            prompt_instructions=prompt_instructions,
+            target_language=target_language,
+            content_items_json_string=content_items_json_string
+        )
 
-Target language for translation of text elements: {target_language}
-
-The content items to be processed into a single XHTML string are provided below as a JSON array.
-Each object in the array has a "type" ('text' or 'image') and "data".
-For "text" type, "data" is the string to be translated.
-For "image" type, "data" is an object with "src" (to be preserved) and "alt" (to be translated if present).
-
-Content Items:
-```json
-{content_items_json_string}
-```
-
-Please generate the complete XHTML string based on these items and the instructions.
-The response should be a single JSON object containing the key "translated_xhtml_content" with the generated XHTML string as its value.
-"""
         logger.debug(f"Constructed XHTML generation prompt. Length: {len(full_prompt)}")
         logger.debug(f"Prompt (first 500 chars): {full_prompt[:500]}")
         return full_prompt
