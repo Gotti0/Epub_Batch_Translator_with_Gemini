@@ -1,5 +1,6 @@
 # ebtg/ebtg_app_service.py
 
+import re
 import xml.etree.ElementTree as ET
 import logging
 from pathlib import Path
@@ -304,19 +305,32 @@ class EbtgAppService:
 
                         if is_fragment:
                             segment_id_prefix = f"{Path(item_filename).stem}_part_{i+1}{Path(item_filename).suffix}"
-                            # Create a concise summary for the overall task when processing a fragment.
-                            overall_task_summary_for_fragment = (
-                                f"You are translating a fragment of a larger XHTML document. "
-                                f"The complete document is to be translated into {target_language} "
-                                f"adhering to general translation principles including accuracy, style consistency, "
-                                f"and preservation of XHTML structure. Detailed instructions follow."
-                            )
+                            
+                            # 1. Get the base universal prompt, language resolved.
+                            base_universal_prompt = universal_prompt_template.replace('{target_language}', target_language)
 
-                            prompt_for_btg_integration = (
-                                f"You are generating an XHTML fragment. The overall task is: '{overall_task_summary_for_fragment}'. "
-                                f"Now, using the universal translation instruction: '{universal_prompt_template.replace('{target_language}', target_language)}', "
-                                f"process the following content items. Ensure correct relative order. Do NOT include html, head, or body tags."
+                            # 2. Clean the base prompt for XHTML fragment context:
+                            #    Remove or adapt placeholders like {{content_items}}, {{slot}} as items are externally provided.
+                            #    Remove {{lorebook_context}} if not filled by EBTG for XHTML generation.
+                            prompt_cleaned_for_fragment = base_universal_prompt
+                            # Replace the main data section with a note that items are provided separately
+                            prompt_cleaned_for_fragment = re.sub(
+                                r"## 번역할 원문.*?({{#if content_items}}.*?{{/if}})",
+                                "## 번역할 원문\n(구조화된 콘텐츠 항목은 이 지침 다음에 별도의 JSON 형식으로 제공됩니다. 해당 항목들을 처리해주세요.)",
+                                prompt_cleaned_for_fragment, flags=re.DOTALL | re.IGNORECASE
                             )
+                            if "{{lorebook_context}}" in prompt_cleaned_for_fragment: # If EBTG doesn't fill it here
+                                prompt_cleaned_for_fragment = prompt_cleaned_for_fragment.replace("{{lorebook_context}}", "(로어북 컨텍스트는 이 XHTML 조각 생성 작업의 일부가 아닐 수 있습니다.)")
+
+                            # 3. Add concise fragment-specific instructions.
+                            fragment_directive = (
+                                "\n\nIMPORTANT INSTRUCTION FOR THIS SPECIFIC TASK (FRAGMENT MODE):\n"
+                                "You are currently processing a FRAGMENT of a larger document. "
+                                "Your output for THIS task must be ONLY the XHTML content for the body of this fragment. "
+                                "Do NOT include `<html>`, `<head>`, or `<body>` tags in your response. "
+                                "The content items for this fragment will be provided in a JSON block following all instructions."
+                            )
+                            prompt_for_btg_integration = prompt_cleaned_for_fragment + fragment_directive
                         else:
                             segment_id_prefix = item_filename
                             prompt_for_btg_integration = universal_prompt_template.replace(

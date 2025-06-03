@@ -8,6 +8,7 @@ import queue # For thread-safe log communication
 import io # For TqdmToTkinter
 from pathlib import Path
 import json # For JSON operations in settings
+from typing import Optional # Added Optional for type hinting
 import time # For time tracking
 
 # Assuming EbtgAppService is in the same directory or package
