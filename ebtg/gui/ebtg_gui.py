@@ -138,14 +138,16 @@ class Tooltip:
     def show_tooltip(self, event=None):
         if self.tooltip_window or not self.text:
             return
-        x, y, _, _ = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 20
+
+        # Use mouse cursor's screen coordinates from the event object.
+        # Add a small offset so the tooltip doesn't appear directly under the cursor.
+        # The 'event' object is guaranteed by the <Enter> binding.
+        x = event.x_root + 15
+        y = event.y_root + 10
 
         self.tooltip_window = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
-
         label = tk.Label(tw, text=self.text, justify=tk.LEFT,
                          background="#ffffe0", relief=tk.SOLID, borderwidth=1,
                          font=("tahoma", "8", "normal"))
