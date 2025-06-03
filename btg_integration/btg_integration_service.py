@@ -165,11 +165,19 @@ class BtgIntegrationService:
 
         # Prepare the prompt by filling in language and lorebook context
         # The {{slot}} will be filled by BTG's TranslationService.
-        prompt_with_context = prompt_template_for_fragment_generation.replace(
+        # First, replace target_language
+        prompt_with_lang = prompt_template_for_fragment_generation.replace(
             "{target_language}", target_language
-        ).replace(
-            "{ebtg_lorebook_context}", ebtg_lorebook_context or "제공된 로어북 컨텍스트 없음"
         )
+
+        # Then, inject EBTG's lorebook context into {{lorebook_context}}
+        if "{{lorebook_context}}" in prompt_with_lang:
+            actual_ebtg_lorebook_context = ebtg_lorebook_context or "제공된 로어북 컨텍스트 없음 (EBTG)"
+            prompt_with_context = prompt_with_lang.replace("{{lorebook_context}}", actual_ebtg_lorebook_context)
+            logger.info(f"BtgIntegrationService: EBTG lorebook context injected into '{{{{lorebook_context}}}}'. Preview: {actual_ebtg_lorebook_context[:100]}...")
+        else:
+            prompt_with_context = prompt_with_lang
+            logger.debug("BtgIntegrationService: '{{lorebook_context}}' placeholder not found in prompt. EBTG lorebook not injected by BtgIntegrationService.")
 
         try:
             fragment: str = self.btg_app_service.translation_service.translate_text_to_xhtml_fragment(
@@ -212,11 +220,17 @@ class BtgIntegrationService:
 
         # Prepare the base prompt by filling in language and lorebook context once
         # The {{slot}} will be filled by the BTG module for each chunk.
-        prompt_template_with_context = request_dto.prompt_template_for_fragment_generation.replace(
+        base_prompt_with_lang = request_dto.prompt_template_for_fragment_generation.replace(
             "{target_language}", request_dto.target_language
-        ).replace(
-            "{ebtg_lorebook_context}", request_dto.ebtg_lorebook_context or "제공된 로어북 컨텍스트 없음"
         )
+
+        if "{{lorebook_context}}" in base_prompt_with_lang:
+            actual_ebtg_lorebook_context_for_batch = request_dto.ebtg_lorebook_context or "제공된 로어북 컨텍스트 없음 (EBTG)"
+            prompt_template_with_context = base_prompt_with_lang.replace("{{lorebook_context}}", actual_ebtg_lorebook_context_for_batch)
+            logger.info(f"BtgIntegrationService (batch): EBTG lorebook context injected into '{{{{lorebook_context}}}}' for all chunks. Preview: {actual_ebtg_lorebook_context_for_batch[:100]}...")
+        else:
+            prompt_template_with_context = base_prompt_with_lang
+            logger.debug("BtgIntegrationService (batch): '{{lorebook_context}}' placeholder not found in batch prompt. EBTG lorebook not injected by BtgIntegrationService.")
 
         for index, text_chunk in enumerate(request_dto.text_chunks):
             try:
