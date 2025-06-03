@@ -4,10 +4,9 @@ from pathlib import Path
 from typing import Tuple, List
 
 try:
-    from epubcheck import EpubCheck, EpubcheckError
+    from epubcheck import EpubCheck
 except ImportError:
     EpubCheck = None
-    EpubcheckError = Exception # Fallback for type hinting if library is not installed
     logging.getLogger(__name__).warning(
         "epubcheck-python library not found. EPUB validation will be skipped. "
         "Please install it via 'pip install epubcheck-python'."
@@ -60,9 +59,6 @@ class EpubValidationService:
                 if level == "ERROR": errors.append(formatted_msg)
                 elif level == "WARNING": warnings.append(formatted_msg)
             return not errors, errors, warnings
-        except EpubcheckError as e: # Catch specific epubcheck errors
-            logger.error(f"Epubcheck library error during validation for {epub_file_path}: {e}", exc_info=True)
-            return False, [f"Epubcheck library error: {str(e)}"], []
-        except Exception as e:
+        except Exception as e: # Catch general exceptions during EpubCheck execution
             logger.error(f"An unexpected error occurred during EPUB validation for {epub_file_path}: {e}", exc_info=True)
             return False, [f"Unexpected validation error: {str(e)}"], []

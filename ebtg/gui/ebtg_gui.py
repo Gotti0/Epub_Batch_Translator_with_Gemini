@@ -109,15 +109,20 @@ class ScrollableFrame:
                 self.canvas.yview_scroll(1, "units")
             elif event.num == 4 or event.delta > 0: # Scroll up
                 self.canvas.yview_scroll(-1, "units")
+        
+        # Bind mouse wheel events directly to the canvas and the scrollable frame.
+        # This is more targeted than bind_all.
+        for widget_to_bind in [self.canvas, self.scrollable_frame]:
+            widget_to_bind.bind("<MouseWheel>", _on_mousewheel, add="+")
+            widget_to_bind.bind("<Button-4>", _on_mousewheel, add="+") # For Linux scroll up
+            widget_to_bind.bind("<Button-5>", _on_mousewheel, add="+") # For Linux scroll down
 
-        # Bind to the canvas itself, and main_frame for enter/leave
-        self.canvas.bind_all("<MouseWheel>", _on_mousewheel, add="+") # Bind globally when mouse is over canvas
-        self.canvas.bind_all("<Button-4>", _on_mousewheel, add="+") # Linux scroll up
-        self.canvas.bind_all("<Button-5>", _on_mousewheel, add="+") # Linux scroll down
-
-        # Unbind when mouse leaves the main_frame to prevent global scrolling issues
-        self.main_frame.bind('<Enter>', lambda e: self.canvas.focus_set()) # Focus canvas on enter
-        # Consider if unbinding is truly necessary or if focus management is enough
+        # Recursively bind to children of scrollable_frame if needed,
+        # or ensure focus is correctly managed.
+        # For simplicity, focusing the canvas when the mouse enters its area is a common approach.
+        self.main_frame.bind('<Enter>', lambda e: self.canvas.focus_set()) 
+        # Optionally, clear focus or set to another widget on <Leave> if it causes issues.
+        # e.g., self.main_frame.bind('<Leave>', lambda e: self.main_frame.focus_set())
 
     def pack(self, **kwargs):
         self.main_frame.pack(**kwargs)
@@ -177,14 +182,22 @@ class EbtgGui:
 
         self.setup_logging() # Setup logging after log_text widget is created
 
+        # self.root.update_idletasks() # This was tried before.
+
         if self.ebtg_app_service:
-            self._load_ebtg_settings_to_ui()
-            self._update_model_list_ui() # Initial model list load
+            # Defer loading settings to UI until the event loop is idle
+            self.root.after(0, self._initialize_ui_with_settings)
         else:
             # Disable start button if service failed to initialize
             if hasattr(self, 'start_button'): self.start_button.config(state=tk.DISABLED)
             logging.getLogger(__name__).error("EBTG App Service가 None이므로 설정 UI가 올바르게 로드되지 않을 수 있습니다.")
 
+    def _initialize_ui_with_settings(self):
+        """Helper method to load settings and update UI, called via root.after()"""
+        if not self.ebtg_app_service: # Should not happen if called from the conditional block
+            return
+        self._load_ebtg_settings_to_ui()
+        self._update_model_list_ui() # Initial model list load
 
     def _create_epub_translation_widgets(self, parent_frame):
         # --- File Selection Frame ---
@@ -758,7 +771,8 @@ class EbtgGui:
 
         # Load BTG Lorebook Management Tab settings
         self.btg_lorebook_json_path_entry.delete(0, tk.END)
-        self.btg_lorebook_json_path_entry.insert(0, config.get("lorebook_json_path", ""))
+        # Ensure that a string is always passed to insert, handling None from config.get
+        self.btg_lorebook_json_path_entry.insert(0, config.get("lorebook_json_path") or "")
         self.btg_sample_ratio_scale.set(config.get("lorebook_sampling_ratio", 25.0))
         self.btg_sample_ratio_label.config(text=f"{self.btg_sample_ratio_scale.get():.1f}%")
         self.btg_max_entries_per_segment_spinbox.set(str(config.get("lorebook_max_entries_per_segment", 5)))
