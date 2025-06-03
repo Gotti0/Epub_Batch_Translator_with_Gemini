@@ -24,6 +24,8 @@ from .config_manager import EbtgConfigManager # Assuming a config manager for EB
 # Assuming BTG module is accessible
 from btg_module.app_service import AppService as BtgAppService
 from btg_module.exceptions import BtgServiceException
+from btg_module.dtos import LorebookEntryDTO # For EBTG-managed lorebook
+from btg_module.file_handler import read_json_file as btg_read_json_file # To avoid name clash if ebtg had one
 from collections import defaultdict
 
 @dataclass
@@ -51,6 +53,13 @@ class EbtgAppService:
         self.config_manager = EbtgConfigManager(config_path)
         self.config: Dict[str, Any] = self.config_manager.load_config()
 
+        # EBTG-managed lorebook
+        self.ebtg_lorebook_entries: List[LorebookEntryDTO] = []
+        self.ebtg_lorebook_json_path = self.config.get("ebtg_lorebook_json_path")
+        self.ebtg_max_lorebook_entries_injection = self.config.get("ebtg_max_lorebook_entries_injection", 5)
+        self.ebtg_max_lorebook_chars_injection = self.config.get("ebtg_max_lorebook_chars_injection", 1000)
+        self._load_ebtg_lorebook_data()
+
         btg_config_path = self.config.get("btg_config_path")
         self.btg_app_service = BtgAppService(config_file_path=btg_config_path)
         
@@ -67,6 +76,103 @@ class EbtgAppService:
         
         logger.info("EbtgAppService initialized.")
         logger.info(f"EBTG Target Language: {self.config.get('target_language', 'ko')}")
+        if self.ebtg_lorebook_entries:
+            logger.info(f"EBTG Lorebook loaded with {len(self.ebtg_lorebook_entries)} entries from {self.ebtg_lorebook_json_path}")
+
+    def _load_ebtg_lorebook_data(self):
+        """Loads lorebook data for EBTG's own injection mechanism."""
+        if self.ebtg_lorebook_json_path and Path(self.ebtg_lorebook_json_path).exists():
+            try:
+                raw_data = btg_read_json_file(self.ebtg_lorebook_json_path)
+                if isinstance(raw_data, list):
+                    for item_dict in raw_data:
+                        if isinstance(item_dict, dict) and "keyword" in item_dict and "description" in item_dict:
+                            try:
+                                entry = LorebookEntryDTO(
+                                    keyword=item_dict.get("keyword", ""),
+                                    description=item_dict.get("description", ""),
+                                    category=item_dict.get("category"),
+                                    importance=int(item_dict.get("importance", 0)) if item_dict.get("importance") is not None else None,
+                                    sourceSegmentTextPreview=item_dict.get("sourceSegmentTextPreview"),
+                                    isSpoiler=bool(item_dict.get("isSpoiler", False)),
+                                    source_language=item_dict.get("source_language")
+                                )
+                                if entry.keyword and entry.description:
+                                    self.ebtg_lorebook_entries.append(entry)
+                            except (TypeError, ValueError) as e_dto:
+                                logger.warning(f"EBTG Lorebook: Error converting item to DTO: {item_dict}, Error: {e_dto}")
+                logger.info(f"EBTG Lorebook: Loaded {len(self.ebtg_lorebook_entries)} entries from {self.ebtg_lorebook_json_path}")
+            except Exception as e:
+                logger.error(f"EBTG Lorebook: Failed to load or parse from {self.ebtg_lorebook_json_path}: {e}", exc_info=True)
+        else:
+            logger.info(f"EBTG Lorebook: Path '{self.ebtg_lorebook_json_path}' not configured or file does not exist. No EBTG-specific lorebook loaded.")
+
+    def _format_ebtg_lorebook_for_prompt(self, lorebook_entries: List[LorebookEntryDTO]) -> str:
+        """Formats selected EBTG lorebook entries for prompt injection."""
+        if not lorebook_entries:
+            return "로어북 컨텍스트 없음 (EBTG 제공)"
+
+        selected_entries_str = []
+        current_chars = 0
+        entries_count = 0
+
+        def sort_key(entry: LorebookEntryDTO):
+            importance = entry.importance or 0
+            if entry.isSpoiler:
+                importance -= 100
+            return (-importance, entry.keyword.lower())
+
+        sorted_entries = sorted(lorebook_entries, key=sort_key)
+
+        for entry in sorted_entries:
+            if entries_count >= self.ebtg_max_lorebook_entries_injection:
+                break
+
+            details_parts = []
+            if entry.category: details_parts.append(f"카테고리: {entry.category}")
+            if entry.isSpoiler is not None: details_parts.append(f"스포일러: {'예' if entry.isSpoiler else '아니오'}")
+            details_str = ", ".join(details_parts)
+            lang_info = f" (언어: {entry.source_language})" if entry.source_language else ""
+            entry_str = f"- {entry.keyword}{lang_info}: {entry.description} ({details_str})"
+
+            if current_chars + len(entry_str) > self.ebtg_max_lorebook_chars_injection and entries_count > 0:
+                break
+            
+            selected_entries_str.append(entry_str)
+            current_chars += len(entry_str) + 1 
+            entries_count += 1
+        
+        if not selected_entries_str:
+            return "로어북 컨텍스트 없음 (EBTG 제공 - 제한으로 인해 선택된 항목 없음)"
+            
+        return "\n".join(selected_entries_str)
+
+    def _get_relevant_lorebook_context_for_items(self, content_items: List[Dict[str, Any]]) -> str:
+        """Filters EBTG lorebook entries based on content_items and formats them."""
+        if not self.ebtg_lorebook_entries or not content_items:
+            return "로어북 컨텍스트 없음 (EBTG 제공 - 로어북 비어있거나 콘텐츠 없음)"
+
+        relevant_entries: List[LorebookEntryDTO] = []
+        combined_text_for_matching = ""
+        for item in content_items:
+            if item.get("type") == "text" and isinstance(item.get("data"), str):
+                combined_text_for_matching += item["data"].lower() + " "
+            elif item.get("type") == "image" and isinstance(item.get("data"), dict) and isinstance(item["data"].get("alt"), str):
+                combined_text_for_matching += item["data"]["alt"].lower() + " "
+        
+        if not combined_text_for_matching.strip():
+            return "로어북 컨텍스트 없음 (EBTG 제공 - 콘텐츠 내 텍스트 없음)"
+
+        for entry in self.ebtg_lorebook_entries:
+            if entry.keyword.lower() in combined_text_for_matching:
+                relevant_entries.append(entry)
+        
+        if relevant_entries:
+            logger.info(f"EBTG Lorebook: Found {len(relevant_entries)} relevant entries for current content. Keywords: {[e.keyword for e in relevant_entries[:5]]}...")
+            return self._format_ebtg_lorebook_for_prompt(relevant_entries)
+        else:
+            logger.info("EBTG Lorebook: No relevant entries found for current content.")
+            return "로어북 컨텍스트 없음 (EBTG 제공 - 관련 항목 없음)"
 
     def _wrap_body_fragments_in_full_xhtml(self, body_fragments_concatenated: str, title: str, lang: str) -> str:
         """Wraps concatenated body fragments into a complete XHTML document."""
@@ -436,10 +542,19 @@ class EbtgAppService:
                         else:
                             segment_id_prefix = item_filename
                             prompt_for_btg_integration = universal_prompt_template.replace(
-                                "{target_language}", target_language
+                                "{target_language}", target_language # Target language already in the prompt
                             )
-                        current_prompt_instructions = prompt_for_btg_integration
+                        
+                        # Inject EBTG-managed lorebook context
+                        ebtg_lorebook_context_str = self._get_relevant_lorebook_context_for_items(segment_items)
+                        if "{{lorebook_context}}" in prompt_for_btg_integration:
+                            current_prompt_instructions = prompt_for_btg_integration.replace("{{lorebook_context}}", ebtg_lorebook_context_str)
+                            logger.info(f"EBTG: Injected lorebook context for {segment_id_prefix}. Context (first 100 chars): {ebtg_lorebook_context_str[:100]}")
+                        else:
+                            current_prompt_instructions = prompt_for_btg_integration
+                            logger.warning(f"EBTG: '{{{{lorebook_context}}}}' placeholder not found in prompt for {segment_id_prefix}, EBTG lorebook not injected.")
 
+                        
                         logger.info(f"Requesting XHTML for {'fragment' if is_fragment else 'document'}: {segment_id_prefix} ({len(segment_items)} items)")
                         
                         generated_segment_xhtml_str = self.btg_integration.generate_xhtml(

@@ -19,7 +19,10 @@ class EbtgConfigManager:
             # "content_segmentation_max_items": 0, # Replaced by xhtml_segment_target_chars
             "xhtml_segment_target_chars": 4000, # Target character length for XHTML content items per segment. 0 or negative means no char-based segmentation.
             "perform_epub_validation": True, # New option to control EPUB validation
-            "perform_content_omission_check": True # New option for content omission check
+            "perform_content_omission_check": True, # New option for content omission check
+            "ebtg_lorebook_json_path": None, # Path for EBTG's primary lorebook
+            "ebtg_max_lorebook_entries_injection": 5, # Max EBTG lorebook entries to inject into prompt
+            "ebtg_max_lorebook_chars_injection": 1000  # Max EBTG lorebook chars to inject into prompt
      }
 
     def load_config(self) -> Dict[str, Any]:
