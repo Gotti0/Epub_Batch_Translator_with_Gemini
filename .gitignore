@@ -39,3 +39,6 @@ myenv/
 *.swp
 *~
 .DS_Store
+
+#Config
+ebtg_config.json
