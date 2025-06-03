@@ -304,17 +304,16 @@ class EbtgAppService:
 
                         if is_fragment:
                             segment_id_prefix = f"{Path(item_filename).stem}_part_{i+1}{Path(item_filename).suffix}"
-                            # Construct the "overall task description" for fragment generation
-                            overall_task_desc_for_fragment = universal_prompt_template.replace(
-                                "{target_language}", target_language
-                            ).replace(
-                                "{{content_items}}", "the provided content items to form a complete XHTML document"
-                            ).replace( # Remove lorebook context for overall description to keep it concise
-                                "LOREBOOK_CONTEXT: {{lorebook_context}}", ""
-                            ).strip()
+                            # Create a concise summary for the overall task when processing a fragment.
+                            overall_task_summary_for_fragment = (
+                                f"You are translating a fragment of a larger XHTML document. "
+                                f"The complete document is to be translated into {target_language} "
+                                f"adhering to general translation principles including accuracy, style consistency, "
+                                f"and preservation of XHTML structure. Detailed instructions follow."
+                            )
 
                             prompt_for_btg_integration = (
-                                f"You are generating an XHTML fragment. The overall task is: '{overall_task_desc_for_fragment}'. "
+                                f"You are generating an XHTML fragment. The overall task is: '{overall_task_summary_for_fragment}'. "
                                 f"Now, using the universal translation instruction: '{universal_prompt_template.replace('{target_language}', target_language)}', "
                                 f"process the following content items. Ensure correct relative order. Do NOT include html, head, or body tags."
                             )
