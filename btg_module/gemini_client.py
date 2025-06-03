@@ -439,7 +439,7 @@ class GeminiClient:
                         response_iterator = self.client.models.generate_content_stream( # Renamed for clarity
                             model=effective_model_name,
                             contents=final_contents,
-                            **(effective_generation_config_params or {}) # Pass params directly
+                            config=effective_generation_config_params # Changed to 'config'
                         )
                         # 스트리밍 응답에서 JSON을 올바르게 처리하려면 추가 로직이 필요할 수 있음
                         # 여기서는 단순 텍스트 결합으로 가정
@@ -460,7 +460,7 @@ class GeminiClient:
                         response = self.client.models.generate_content(
                             model=effective_model_name,
                             contents=final_contents,
-                            **(effective_generation_config_params or {}) # Pass params directly
+                            config=effective_generation_config_params # Changed to 'config'
                         )
 
                         if self._is_content_safety_error(response=response):
