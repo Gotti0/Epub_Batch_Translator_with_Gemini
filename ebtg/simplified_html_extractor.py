@@ -2,6 +2,7 @@
 import logging
 from typing import List, Dict, Any, Union # Union 추가
 from bs4 import BeautifulSoup, NavigableString, Tag
+import time # Added for delay
 
 # 새로운 아키텍처를 위한 DTO 임포트
 from .ebtg_dtos import TextBlock, ImageInfo, ExtractedContentElement
@@ -11,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 class SimplifiedHtmlExtractor:
     def __init__(self):
-        pass
+        # Optional: Make delay parameters configurable via __init__
+        # self.delay_interval_elements = 100  # Add delay every N elements
+        # self.delay_seconds = 0.001          # Delay duration
+        pass # type: ignore
     
     def extract_content(self, xhtml_string: str) -> List[ExtractedContentElement]:
         logger.debug("Starting XHTML content extraction.")
@@ -29,7 +33,20 @@ class SimplifiedHtmlExtractor:
 
             current_text_parts: List[str] = []
 
+            # --- Parameters for adding a small delay ---
+            # This is a palliative measure. Consider profiling for the true bottleneck.
+            # If logs are very verbose (like DEBUG), reducing log level might be more effective.
+            elements_processed_since_last_delay = 0
+            DELAY_EVERY_N_ELEMENTS = 5  # Add a delay every 200 elements processed
+            DELAY_SECONDS = 0.001  # 1 millisecond delay
+
+
+
             for element in body.descendants:
+                elements_processed_since_last_delay += 1
+                if elements_processed_since_last_delay >= DELAY_EVERY_N_ELEMENTS:
+                    time.sleep(DELAY_SECONDS)
+                    elements_processed_since_last_delay = 0
                 if isinstance(element, NavigableString):
                     text_content = element.string
                     if text_content:
