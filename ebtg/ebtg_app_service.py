@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List, Callable # List 추가, Callable �
 
 # Assuming these services and DTOs are defined in the ebtg package
 from .epub_processor_service import EpubProcessorService, EpubXhtmlItem # Assuming EpubXhtmlItem DTO
+from bs4 import BeautifulSoup # For parsing HTML fragments
 from .simplified_html_extractor import SimplifiedHtmlExtractor # type: ignore
 from .ebtg_content_segmentation_service import ContentSegmentationService
 from btg_integration.btg_integration_service import BtgIntegrationService # Corrected import
@@ -334,20 +335,35 @@ class EbtgAppService:
                         )
 
                         if generated_segment_xhtml_str:
-                            # Basic validation for the generated fragment/document
-                            # Use QualityMonitorService for validation
+                            actual_segment_content_to_append = generated_segment_xhtml_str
+                            if is_fragment: # If we requested a fragment
+                                # Check if the API (possibly via BtgAppService internal wrapping) returned a full document
+                                temp_soup_for_frag_check = BeautifulSoup(generated_segment_xhtml_str, 'html.parser')
+                                html_tag_in_frag = temp_soup_for_frag_check.find('html')
+                                body_tag_in_frag = temp_soup_for_frag_check.find('body')
+
+                                if html_tag_in_frag and body_tag_in_frag: # It's likely a full document
+                                    logger.debug(f"Segment {segment_id_prefix} (requested as fragment) appears to be a full document. Extracting body content.")
+                                    extracted_body_content = "".join(str(c) for c in body_tag_in_frag.contents).strip()
+                                    if extracted_body_content:
+                                        actual_segment_content_to_append = extracted_body_content
+                                    elif generated_segment_xhtml_str.strip(): # Body was empty but original was not
+                                        logger.warning(f"Extracted empty body from full-doc fragment {segment_id_prefix}. Using original fragment string as fallback for this part.")
+                                        # actual_segment_content_to_append remains generated_segment_xhtml_str
+                                    # If extracted_body_content is empty and original was also effectively empty, it's fine.
+                                # else: It's not a full document, assume it's already the desired fragment content.
+
+                            # Now validate actual_segment_content_to_append
                             is_valid_segment, validation_errors = self.quality_monitor.validate_xhtml_structure(
-                                generated_segment_xhtml_str, segment_id_prefix
+                                actual_segment_content_to_append, segment_id_prefix
                             )
                             if is_valid_segment:
-                                logger.info(f"Successfully generated and validated XHTML segment: {segment_id_prefix}.")
-                                final_xhtml_parts.append(generated_segment_xhtml_str)
+                                logger.info(f"Successfully generated and validated XHTML segment content: {segment_id_prefix}.")
+                                final_xhtml_parts.append(actual_segment_content_to_append)
                             else:
-                                logger.error(f"Generated XHTML segment {segment_id_prefix} is not well-formed. Errors: {validation_errors}. This part will be problematic.")
-                                # Depending on strictness, could mark as error or try to use it anyway if it's a fragment
-                                final_xhtml_parts.append(f"<!-- MALFORMED FRAGMENT: {segment_id_prefix} -->") # Or skip
-                                segment_has_errors = True # Mark that this segment had issues
-                                # break # Option: stop processing further segments for this item on first error
+                                logger.error(f"XHTML segment content for {segment_id_prefix} is not well-formed. Errors: {validation_errors}. This part will be problematic.")
+                                final_xhtml_parts.append(f"<!-- MALFORMED FRAGMENT CONTENT: {segment_id_prefix} -->") # Or skip
+                                segment_has_errors = True
                             
                             # Content omission check for the segment (optional, might be too granular)
                             # _, omission_warnings_segment = self.quality_monitor.check_content_omission(segment_items, generated_segment_xhtml_str, segment_id_prefix)
