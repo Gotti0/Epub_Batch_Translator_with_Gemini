@@ -322,12 +322,23 @@ class TranslationService:
         if not self.gemini_client:
             logger.error("GeminiClient가 초기화되지 않았습니다. 텍스트를 XHTML 조각으로 번역할 수 없습니다.")
             raise BtgServiceException("GeminiClient is not initialized.")
-
+        
         if not text_chunk.strip():
             logger.info("번역할 텍스트 청크가 비어있습니다. 빈 <p></p> 조각을 반환합니다.")
             return "<p></p>" # 또는 빈 문자열, 정책에 따라 결정
 
-        # {{slot}}을 실제 텍스트 청크로 대체
+        # Configuration for content safety retry
+        use_retry = self.config.get("use_content_safety_retry", True) # Assuming this config exists or add it
+        max_attempts = self.config.get("max_content_safety_split_attempts", 3)
+        min_size = self.config.get("min_content_safety_chunk_size", 100)
+
+        if use_retry:
+            return self._translate_to_xhtml_fragment_recursive(
+                text_chunk, target_language, prompt_template_with_context_and_slot,
+                0, max_attempts, min_size
+            )
+        
+        # Original direct call if retry is disabled
         final_prompt_for_api = prompt_template_with_context_and_slot.replace("{{slot}}", text_chunk)
 
         # Gemini API가 반환할 JSON 스키마 정의
@@ -382,6 +393,81 @@ class TranslationService:
         except Exception as e_unexpected:
             logger.error(f"XHTML 조각 생성 중 예상치 못한 오류 발생: {e_unexpected}", exc_info=True)
             raise BtgTranslationException(f"XHTML 조각 생성 중 알 수 없는 오류: {e_unexpected}", original_exception=e_unexpected) from e_unexpected
+
+    def _translate_to_xhtml_fragment_recursive(
+        self,
+        text_chunk: str,
+        target_language: str,
+        prompt_template_with_context_and_slot: str,
+        current_attempt: int,
+        max_split_attempts: int,
+        min_chunk_size: int
+    ) -> str:
+        """
+        Recursively attempts to translate a text chunk to an XHTML fragment,
+        splitting on content safety exceptions.
+        """
+        if not text_chunk.strip():
+            return "" # Or "<p></p>" if empty fragments should be represented
+
+        final_prompt_for_api = prompt_template_with_context_and_slot.replace("{{slot}}", text_chunk)
+        response_schema = {
+            "type": "object",
+            "properties": {"translated_xhtml_fragment": {"type": "string", "description": "A single XHTML fragment, typically a p tag with translated text."}},
+            "required": ["translated_xhtml_fragment"]
+        }
+        generation_config_dict = {
+            "temperature": self.config.get("temperature", 0.5),
+            "top_p": self.config.get("top_p", 0.95),
+            "response_mime_type": "application/json",
+            "response_schema": response_schema
+        }
+        model_name = self.config.get("model_name", "gemini-2.0-flash")
+
+        try:
+            logger.debug(f"Attempt {current_attempt + 1} for XHTML fragment from chunk: {text_chunk[:50]}...")
+            api_response_dict = self.gemini_client.generate_text(
+                prompt=final_prompt_for_api, model_name=model_name, generation_config_dict=generation_config_dict
+            )
+            if not isinstance(api_response_dict, dict):
+                raise BtgTranslationException("API로부터 유효한 JSON 객체 응답을 받지 못했습니다.")
+            translated_fragment = api_response_dict.get("translated_xhtml_fragment")
+            if not isinstance(translated_fragment, str):
+                raise BtgTranslationException("API 응답에서 'translated_xhtml_fragment'를 찾을 수 없거나 형식이 잘못되었습니다.")
+            return translated_fragment.strip()
+
+        except GeminiContentSafetyException as e_safety:
+            logger.warning(f"XHTML fragment generation: Content safety issue on attempt {current_attempt + 1} for chunk: {text_chunk[:50]}... Error: {e_safety}")
+            if current_attempt < max_split_attempts and len(text_chunk.strip()) > min_chunk_size:
+                logger.info(f"Splitting chunk and retrying (attempt {current_attempt + 1}/{max_split_attempts}).")
+                sub_chunks = self.chunk_service.split_chunk_recursively(
+                    text_chunk, target_size=len(text_chunk) // 2, min_chunk_size=min_chunk_size, max_split_depth=1
+                )
+                if len(sub_chunks) <= 1: # If not splittable by primary strategy
+                    sub_chunks = self.chunk_service.split_chunk_by_sentences(text_chunk, max_sentences_per_chunk=1)
+                    if len(sub_chunks) <= 1: # Still not splittable
+                        logger.error(f"Cannot split problematic chunk further for XHTML fragment. Chunk: {text_chunk[:50]}...")
+                        return f"<p>[Content Safety Error - Unresolvable for chunk: {text_chunk[:30]}...]</p>"
+
+                translated_sub_fragments = []
+                for sub_c in sub_chunks:
+                    if not sub_c.strip(): continue
+                    translated_sub_fragments.append(
+                        self._translate_to_xhtml_fragment_recursive(
+                            sub_c, target_language, prompt_template_with_context_and_slot,
+                            current_attempt + 1, max_split_attempts, min_chunk_size
+                        )
+                    )
+                return "".join(translated_sub_fragments)
+            else:
+                logger.error(f"Content safety error for XHTML fragment (max attempts or min size reached): {text_chunk[:50]}...")
+                return f"<p>[Content Safety Error - Max attempts/min size for: {text_chunk[:30]}...]</p>"
+        except (BtgApiClientException, BtgTranslationException, BtgServiceException) as e_general:
+            logger.error(f"Error during recursive XHTML fragment translation for chunk {text_chunk[:50]}...: {e_general}")
+            raise # Re-raise to be handled by the initial caller or task wrapper
+        except Exception as e_unexpected:
+            logger.error(f"Unexpected error during recursive XHTML fragment translation for chunk {text_chunk[:50]}...: {e_unexpected}", exc_info=True)
+            raise BtgTranslationException(f"Unexpected error generating XHTML fragment: {e_unexpected}", original_exception=e_unexpected) from e_unexpected
 
     
     def translate_text_with_content_safety_retry(

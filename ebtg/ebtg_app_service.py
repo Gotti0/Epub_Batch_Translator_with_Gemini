@@ -460,27 +460,42 @@ class EbtgAppService:
         Returns (chunk_idx, translated_fragment_or_error_placeholder, error_or_None)
         """
         try:
-            # 최종 프롬프트 문자열 생성 및 길이 계산
-            # prompt_template은 이미 target_language와 lorebook_context가 채워져 있고 {{slot}}만 남은 상태입니다.
-            final_prompt_for_api = prompt_template.replace("{{slot}}", chunk_text)
-            prompt_char_count = len(final_prompt_for_api)
+            # BtgIntegrationService로 전달될 기본 프롬프트 템플릿
+            effective_prompt_template = prompt_template
+
             # Add instruction for handling merged chunks if separator is present
             if EBTG_MERGE_SEPARATOR in chunk_text:
                 merge_handling_instruction = (
-                    "\n\nIMPORTANT: The text to translate above may contain multiple distinct pieces separated by "
-                    f"'{EBTG_MERGE_SEPARATOR}'. Translate each piece independently. In your XHTML output, "
-                    f"ensure the translations of these pieces are also separated by the exact string '{EBTG_MERGE_SEPARATOR}' "
-                    "between their respective paragraph tags (e.g., <p>Translated Piece 1</p>"
-                    f"{EBTG_MERGE_SEPARATOR}<p>Translated Piece 2</p>)."
+                    "\n\nIMPORTANT_CHUNK_PROCESSING_NOTE: The text provided in the '{{slot}}' for translation may contain "
+                    f"multiple distinct pieces separated by the special marker '{EBTG_MERGE_SEPARATOR}'. "
+                    "When you encounter this marker, you MUST translate each piece independently. "
+                    "In your final XHTML fragment output, ensure that the translations of these pieces are also "
+                    f"separated by the exact same marker string '{EBTG_MERGE_SEPARATOR}' "
+                    "placed directly between their respective surrounding paragraph tags. "
+                    "For example, if input for the slot is 'Text A<EBTG_TEXT_SEPARATOR_DO_NOT_TRANSLATE_THIS_TAG/>Text B', " # Simplified example for clarity
+                    "your translated output for the slot (after your translation and wrapping) should be "
+                    "'<p>[Translated Text A]</p><EBTG_TEXT_SEPARATOR_DO_NOT_TRANSLATE_THIS_TAG/><p>[Translated Text B]</p>'. "
+                    "Preserve this separator meticulously in the output if it was in the input text for the slot."
                 )
-                final_prompt_for_api = final_prompt_for_api.replace("{{slot}}", chunk_text + merge_handling_instruction, 1)
-            logger.debug(f"API 호출 프롬프트 문자 수 (청크 {chunk_idx}): {prompt_char_count}자. 내용 (앞 100자): {final_prompt_for_api[:100]}...")
+                # Add the instruction to the main prompt template.
+                # This instruction is for the LLM about how to process the content of {{slot}}.
+                effective_prompt_template += merge_handling_instruction
+
+            # Approximate prompt character count for logging (before {{slot}} is filled by BTG's TranslationService)
+            temp_prompt_for_char_count = effective_prompt_template.replace("{target_language}", target_language)
+            if lorebook_context: # Ensure lorebook_context is not None before replacing
+                temp_prompt_for_char_count = temp_prompt_for_char_count.replace("{{lorebook_context}}", lorebook_context)
+            else:
+                temp_prompt_for_char_count = temp_prompt_for_char_count.replace("{{lorebook_context}}", "") # Replace with empty if None
+            
+            prompt_char_count = len(temp_prompt_for_char_count) + len(chunk_text) # Add length of the chunk text itself
+            logger.debug(f"Approx. prompt char count for API (chunk {chunk_idx}): {prompt_char_count} chars. Chunk text length: {len(chunk_text)}.")
 
             translated_fragment = self.btg_integration.translate_single_text_chunk_to_xhtml_fragment(
                 text_chunk=chunk_text,
-                target_language=target_language,
-                prompt_template_for_fragment_generation=prompt_template,
-                ebtg_lorebook_context=lorebook_context
+                target_language=target_language, # For BtgIntegrationService to fill {target_language}
+                prompt_template_for_fragment_generation=effective_prompt_template, # Pass the (potentially modified) prompt
+                ebtg_lorebook_context=lorebook_context # For BtgIntegrationService to fill {{lorebook_context}}
             )
             return chunk_idx, translated_fragment, None
         except Exception as e:
