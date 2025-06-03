@@ -295,46 +295,58 @@ class AppService:
 
     def extract_lorebook( # Renamed from extract_pronouns
         self,
-        input_file_path: Union[str, Path],
+        input_path_for_naming: Union[str, Path], # Changed: This path is for naming the output lorebook.
+                                                 # If novel_text_content is None, this path will also be read.
+        novel_text_content: Optional[str] = None,  # Added: Direct text content for lorebook extraction.
         progress_callback: Optional[Callable[[LorebookExtractionProgressDTO], None]] = None, # DTO Changed
         novel_language_code: Optional[str] = None, # 명시적 언어 코드 전달
         seed_lorebook_path: Optional[Union[str, Path]] = None # CLI에서 전달된 시드 로어북 경로
-        # tqdm_file_stream is not typically used by lorebook extraction directly in AppService,
-        # but can be passed down if LorebookService supports it (currently it doesn't directly)
-        # For CLI, tqdm is handled in the CLI module itself.
     ) -> Path:
         if not self.lorebook_service: # Changed from pronoun_service
             logger.error("로어북 추출 서비스 실패: 서비스가 초기화되지 않았습니다.") # Message updated
             raise BtgServiceException("로어북 추출 서비스가 초기화되지 않았습니다. 설정을 확인하세요.") # Message updated
 
-        logger.info(f"로어북 추출 서비스 시작: {input_file_path}, 시드 파일: {seed_lorebook_path}") # Message updated
-        try:
-            file_content = read_text_file(input_file_path)
-            if not file_content:
-                logger.warning(f"입력 파일이 비어있습니다: {input_file_path}")
-                # For lorebook, an empty input means an empty lorebook, unless a seed is provided.
-                # LorebookService.extract_and_save_lorebook handles empty content.
+        logger.info(f"로어북 추출 서비스 시작. 명명용 입력 경로: {input_path_for_naming}, 시드 파일: {seed_lorebook_path}") # Message updated
+        
+        actual_content_to_process: str
+        input_file_path_obj = Path(input_path_for_naming)
 
+        if novel_text_content is not None:
+            actual_content_to_process = novel_text_content
+            logger.info(f"제공된 'novel_text_content' (길이: {len(actual_content_to_process)})를 직접 사용합니다.")
+        else:
+            logger.info(f"'novel_text_content'가 제공되지 않아, '{input_file_path_obj}' 파일에서 내용을 읽습니다.")
+            if not input_file_path_obj.exists():
+                logger.error(f"로어북 추출을 위한 입력 파일을 찾을 수 없습니다: {input_file_path_obj}")
+                if progress_callback:
+                    progress_callback(LorebookExtractionProgressDTO(0,0,f"오류: 입력 파일 없음 - {input_file_path_obj.name}",0))
+                raise BtgFileHandlerException(f"입력 파일 없음: {input_file_path_obj}")
+            actual_content_to_process = read_text_file(input_file_path_obj)
+            if not actual_content_to_process:
+                logger.warning(f"입력 파일이 비어있습니다: {input_file_path_obj}")
+
+        try:
             # 로어북 추출 시 사용할 언어 코드 결정
             # 1. 명시적으로 전달된 novel_language_code
             # 2. 설정 파일의 novel_language (통합됨)
             # 3. None (LorebookService에서 자체적으로 처리하거나 언어 특정 기능 비활성화)
             lang_code_for_extraction = novel_language_code or self.config.get("novel_language") # 통합된 설정 사용
             result_path = self.lorebook_service.extract_and_save_lorebook( # Method changed
-                file_content, # Pass content directly
-                input_file_path, 
+                actual_content_to_process, # Pass the determined content
+                input_file_path_obj, # Pass the original path for naming
                 lang_code_for_extraction, # 결정된 언어 코드 전달
                 progress_callback, # 콜백 위치 변경
                 seed_lorebook_path=seed_lorebook_path # 시드 로어북 경로 전달
             )
             logger.info(f"로어북 추출 완료. 결과 파일: {result_path}") # Message updated
-
             return result_path
         except FileNotFoundError as e:
-            logger.error(f"로어북 추출을 위한 입력 파일을 찾을 수 없습니다: {input_file_path}") # Message updated
+            # This specific FileNotFoundError might occur if read_text_file itself fails,
+            # though the check above should prevent it.
+            logger.error(f"로어북 추출 중 파일 관련 오류 (예상치 않음): {e}")
             if progress_callback:
-                progress_callback(LorebookExtractionProgressDTO(0,0,f"오류: 입력 파일 없음 - {e.filename}",0)) # DTO Changed
-            raise BtgFileHandlerException(f"입력 파일 없음: {input_file_path}", original_exception=e) from e
+                progress_callback(LorebookExtractionProgressDTO(0,0,f"오류: 파일 처리 오류 - {e.filename}",0))
+            raise BtgFileHandlerException(f"파일 처리 오류: {e}", original_exception=e) from e
         except (BtgBusinessLogicException, BtgApiClientException) as e: # BtgPronounException replaced with BtgBusinessLogicException
             logger.error(f"로어북 추출 중 오류: {e}") # Message updated
             if progress_callback:
