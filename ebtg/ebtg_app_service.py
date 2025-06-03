@@ -709,7 +709,7 @@ class EbtgAppService:
                                         logger.error(f"[{item_filename}] Reassembly error: Ran out of translated body fragments for TextBlocks.")
                                         reassembled_xhtml_parts.append(f"<p>[Translation Error for TextBlock: {element.text_content[:30]}]</p>")
                                         files_with_errors += 1
-                            elif isinstance(element, ImageInfo):
+                            elif isinstance(element, ImageInfo): # Ensure this elif is at the same level as the if above
                                 translated_alt_text = element.original_alt # Default to original
                                 if element.original_alt and element.original_alt.strip(): # This ImageInfo's alt contributed.
                                     try:
@@ -721,14 +721,14 @@ class EbtgAppService:
                                         logger.error(f"[{item_filename}] Reassembly error: Ran out of translated alt text fragments.")
                                     except Exception as e_alt_parse:
                                         logger.warning(f"Failed to parse alt text fragment '{str(translated_alt_fragment)[:50]}...': {e_alt_parse}. Using original alt for {element.src}")
-                                
+                                # Reconstruct the img tag (Corrected indent for this block)
                                 # Reconstruct the img tag
                                 final_alt_text_for_tag = translated_alt_text if translated_alt_text else ""
                                 updated_img_tag = re.sub(r'alt=".*?"', f'alt="{final_alt_text_for_tag}"', element.original_tag_string, flags=re.IGNORECASE)
-                                if f'alt="{final_alt_text_for_tag}"' not in updated_img_tag: # If alt wasn't present or regex failed
-                                    updated_img_tag = re.sub(r'(<img[^>]*?)(\s*\/?>)', rf'\1 alt="{final_alt_text_for_tag}"\2', element.original_tag_string)
+                                if f'alt="{final_alt_text_for_tag}"' not in updated_img_tag: # Corrected indent for this if
+                                    updated_img_tag = re.sub(r'(<img[^>]*?)(\s*\/?>)', rf'\1 alt="{final_alt_text_for_tag}"\2', element.original_tag_string) # Corrected indent for content
                                 reassembled_xhtml_parts.append(updated_img_tag)
-
+                        
                         final_xhtml_content_str = "\n".join(reassembled_xhtml_parts)
                         
                         # Validate and update EPUB content
@@ -813,116 +813,11 @@ class EbtgAppService:
         except Exception as e:
             logger.error(f"An error occurred during EPUB translation: {e}", exc_info=True)
             self.progress_service.save_progress(output_epub_path) # Attempt to save progress even if main process fails
-            if progress_callback:
+            if progress_callback: # Corrected indent for this block
                 progress_callback(EpubProcessingProgressDTO(
                     total_files=total_files if 'total_files' in locals() else 0, 
                     processed_files=processed_files if 'processed_files' in locals() else 0, 
                     errors_count=files_with_errors + 1 if 'files_with_errors' in locals() else 1, 
                     status_message=f"EPUB 번역 중 심각한 오류: {e}"
                 ))
-            raise EbtgProcessingError(f"EPUB translation failed: {e}") from e
-                                    else:
-                                        logger.warning(f"[{item_filename}] Mismatch: More TextBlocks than translated body fragments. Appending empty string for a TextBlock.")
-                                        # reassembled_xhtml_parts.append("<p>[Missing Translation]</p>") # Or skip
-                            elif isinstance(element, ImageInfo):
-                                final_alt_text = element.translated_alt if element.translated_alt else element.original_alt
-                                # Reconstruct the img tag. For simplicity, we use original_tag_string and replace alt.
-                                # A more robust way would be to parse original_tag_string with BeautifulSoup,
-                                # update alt, and then stringify.
-                                updated_img_tag = re.sub(r'alt=".*?"', f'alt="{final_alt_text}"', element.original_tag_string, flags=re.IGNORECASE)
-                                if f'alt="{final_alt_text}"' not in updated_img_tag: # If alt wasn't present or regex failed
-                                    updated_img_tag = re.sub(r'(<img[^>]*?)(\s*\/?>)', rf'\1 alt="{final_alt_text}"\2', element.original_tag_string)
-                                reassembled_xhtml_parts.append(updated_img_tag)
-
-                        final_xhtml_content_str = "\n".join(reassembled_xhtml_parts)
-                        
-                        # Validate and update EPUB content
-                        is_valid_xhtml, validation_errors = self.quality_monitor.validate_xhtml_structure(final_xhtml_content_str, item_filename)
-                        if not is_valid_xhtml:
-                            logger.error(f"[{item_filename}] Reassembled XHTML is not well-formed: {validation_errors}. Using fallback.")
-                            raise EbtgProcessingError(f"Reassembled XHTML for {item_filename} failed validation.")
-
-                        self.epub_processor.update_xhtml_content(item_id, final_xhtml_content_str.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "translated_reassembled_successfully")
-                        generated_xhtml_for_item_successfully = True
-                        logger.info(f"[{item_filename}] Successfully reassembled and updated in EPUB.")
-                        # --- End: Phase 5 ---
-
-                    except (BtgServiceException, EbtgProcessingError) as e_btg_reassembly:
-                        logger.error(f"[{item_filename}] Error during BTG call or reassembly: {e_btg_reassembly}. Using fallback.")
-                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
-                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, f"failed_reassembly_fallback", str(e_btg_reassembly))
-                        files_with_errors += 1
-
-                except (XhtmlExtractionError, ApiXhtmlGenerationError, BtgServiceException, UnicodeDecodeError) as e_proc:
-                    logger.error(f"Processing error for {item_filename}: {e_proc}. Using fallback content.")
-                    fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
-                    self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, f"failed_{type(e_proc).__name__}_fallback", str(e_proc))
-                    files_with_errors += 1
-                except Exception as e_unexpected:
-                    logger.error(f"Unexpected error processing {item_filename}: {e_unexpected}. Using fallback content.", exc_info=True)
-                    fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
-                    self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_unexpected_fallback", str(e_unexpected))
-                    files_with_errors += 1
-            
-            if progress_callback:
-                progress_callback(EpubProcessingProgressDTO(
-                    total_files=total_files,
-                    processed_files=processed_files,
-                    current_file_name=None,
-                    errors_count=files_with_errors,
-                    status_message="EPUB 처리 완료, 저장 중..."
-                ))
-
-            logger.info("All XHTML files processed. Saving new EPUB...")
-            self.epub_processor.save_epub(output_epub_path)
-            self.progress_service.save_progress(output_epub_path) # Save all accumulated progress
-            logger.info(f"Translated EPUB saved to: {output_epub_path}")
-
-            # --- IV. EpubValidationService Integration ---
-            if self.config.get("perform_epub_validation", True):
-                logger.info(f"Performing EPUB validation for {output_epub_path}...")
-                is_valid_epub, epub_errors, epub_warnings = self.epub_validator.validate_epub(output_epub_path)
-                if is_valid_epub:
-                    logger.info(f"EPUB validation successful for {output_epub_path}.")
-                    if epub_warnings:
-                        logger.warning(f"EPUB validation for {output_epub_path} has {len(epub_warnings)} warning(s):")
-                        for warn_idx, warn_msg in enumerate(epub_warnings[:5]): # Log first 5 warnings
-                            logger.warning(f"  Warn {warn_idx+1}: {warn_msg}")
-                else:
-                    logger.error(f"EPUB validation failed for {output_epub_path} with {len(epub_errors)} error(s):")
-                    for err_idx, err_msg in enumerate(epub_errors[:5]): # Log first 5 errors
-                        logger.error(f"  Error {err_idx+1}: {err_msg}")
-            # --- End EpubValidationService Integration ---
-
-            if files_with_errors > 0:
-                logger.warning(f"{files_with_errors}/{total_files} files encountered errors and fallback content was used.")
-
-            if progress_callback:
-                progress_callback(EpubProcessingProgressDTO(
-                    total_files=total_files,
-                    processed_files=processed_files,
-                    current_file_name=None,
-                    errors_count=files_with_errors,
-                    status_message="EPUB 번역 완료!"
-                ))
-
-        except FileNotFoundError as e:
-            logger.error(f"Input EPUB file not found: {input_epub_path} - {e}")
-            if progress_callback:
-                progress_callback(EpubProcessingProgressDTO(total_files=0, processed_files=0, errors_count=1, status_message=f"오류: 입력 파일을 찾을 수 없습니다 - {Path(input_epub_path).name}"))
-            raise EbtgProcessingError(f"Input EPUB not found: {input_epub_path}") from e
-        except Exception as e:
-            logger.error(f"An error occurred during EPUB translation: {e}", exc_info=True)
-            self.progress_service.save_progress(output_epub_path) # Attempt to save progress even if main process fails
-            if progress_callback:
-                progress_callback(EpubProcessingProgressDTO(
-                    total_files=total_files if 'total_files' in locals() else 0, 
-                    processed_files=processed_files if 'processed_files' in locals() else 0, 
-                    errors_count=files_with_errors + 1 if 'files_with_errors' in locals() else 1, 
-                    status_message=f"EPUB 번역 중 심각한 오류: {e}"
-                ))
-            raise EbtgProcessingError(f"EPUB translation failed: {e}") from e
+            raise EbtgProcessingError(f"EPUB translation failed: {e}") from e # Corrected indent for this line
