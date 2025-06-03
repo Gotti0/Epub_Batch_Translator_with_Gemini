@@ -172,9 +172,9 @@ class ConfigManager:
                 try:
                     mw = int(config_data["max_workers"])
                     if mw <= 0:
-                        config_data["max_workers"] = os.cpu_count() or 1
+                        config_data["max_workers"] = 4
                 except (ValueError, TypeError):
-                    config_data["max_workers"] = os.cpu_count() or 1
+                    config_data["max_workers"] = 4
 
 
             write_json_file(self.config_file_path, config_data, indent=4)
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     assert config1["use_vertex_ai"] is False
     assert config1["novel_language"] == "auto" # Changed from ko to auto to match new default
     assert config1["novel_language_fallback"] == "ja"
-    assert config1["max_workers"] == (os.cpu_count() or 1) # max_workers 기본값 확인
+    assert config1["max_workers"] == (4) # max_workers 기본값 확인
     assert config1["requests_per_minute"] == 60 # RPM 기본값 확인
     assert config1["enable_dynamic_lorebook_injection"] is False
     assert config1["max_lorebook_entries_per_chunk_injection"] == 3
@@ -270,7 +270,7 @@ if __name__ == '__main__':
     assert config3["model_name"] == "gemini-2.0-flash"
     assert config3.get("lorebook_sampling_ratio") == 50.0 # 저장된 로어북 설정 확인
     assert config3.get("lorebook_max_entries_per_segment") == 5 # 기본 로어북 설정 확인
-    assert config3["max_workers"] == (os.cpu_count() or 1) # 잘못된 값일 경우 기본값으로 복원되는지 확인
+    assert config3["max_workers"] == (4) # 잘못된 값일 경우 기본값으로 복원되는지 확인
     assert config3["requests_per_minute"] == 0 
     assert config3["enable_dynamic_lorebook_injection"] is False # 기본값 확인
     assert config3["max_lorebook_chars_per_chunk_injection"] == 600 # 저장된 값 확인
@@ -291,6 +291,6 @@ if __name__ == '__main__':
     assert config4["api_key"] == "list_key1" 
     assert config4["chunk_size"] == 7000
     assert config4["model_name"] == "gemini-2.0-flash"
-    assert config4["max_workers"] == (os.cpu_count() or 1) # 0 이하의 값일 경우 기본값으로 복원
+    assert config4["max_workers"] == (4) # 0 이하의 값일 경우 기본값으로 복원
 
     print("\n테스트 완료.")

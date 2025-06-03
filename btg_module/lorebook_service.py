@@ -496,7 +496,7 @@ class LorebookService:
         elif sample_segments: # Process sample_segments
             logger.info(f"총 {len(all_text_segments)}개 세그먼트 중 {num_sample_segments}개의 표본 세그먼트로 로어북 추출 시작...")
         
-            max_workers = self.config.get("max_workers", os.cpu_count() or 1)
+            max_workers = self.config.get("max_workers", 4)
             processed_segments_count = 0
             if progress_callback:
                 progress_callback(LorebookExtractionProgressDTO(

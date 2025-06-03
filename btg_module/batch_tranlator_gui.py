@@ -273,7 +273,7 @@ class BatchTranslatorGUI:
             self.chunk_size_entry.delete(0, tk.END)
             self.chunk_size_entry.insert(0, str(chunk_size_val))
             
-            max_workers_val = config.get("max_workers", os.cpu_count() or 1)
+            max_workers_val = config.get("max_workers", 4)
             logger.debug(f"Config에서 가져온 max_workers: {max_workers_val}")
             self.max_workers_entry.delete(0, tk.END)
             self.max_workers_entry.insert(0, str(max_workers_val))
@@ -453,7 +453,7 @@ class BatchTranslatorGUI:
         ttk.Label(chunk_worker_frame, text="최대 작업자 수:").pack(side="left", padx=(10,5))
         self.max_workers_entry = ttk.Entry(chunk_worker_frame, width=5)
         self.max_workers_entry.pack(side="left")
-        self.max_workers_entry.insert(0, str(os.cpu_count() or 1))
+        self.max_workers_entry.insert(0, "4")
         
         # RPM 설정
         ttk.Label(chunk_worker_frame, text="분당 요청 수 (RPM):").pack(side="left", padx=(10,5))
@@ -959,12 +959,12 @@ class BatchTranslatorGUI:
         try:
             max_workers_val = int(self.max_workers_entry.get())
             if max_workers_val <= 0:
-                max_workers_val = os.cpu_count() or 1 
+                max_workers_val = 4 
                 messagebox.showwarning("입력 오류", f"최대 작업자 수는 1 이상이어야 합니다. 기본값 ({max_workers_val})으로 설정됩니다.")
                 self.max_workers_entry.delete(0, tk.END)
                 self.max_workers_entry.insert(0, str(max_workers_val))
         except ValueError:
-            max_workers_val = os.cpu_count() or 1 
+            max_workers_val = 4 
             messagebox.showwarning("입력 오류", f"최대 작업자 수는 숫자여야 합니다. 기본값 ({max_workers_val})으로 설정됩니다.")
             self.max_workers_entry.delete(0, tk.END)
             self.max_workers_entry.insert(0, str(max_workers_val))

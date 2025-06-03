@@ -7,7 +7,6 @@ import threading
 import queue # For thread-safe log communication
 import io # For TqdmToTkinter
 from pathlib import Path
-import os # For os.cpu_count()
 import json # For JSON operations in settings
 
 # Assuming EbtgAppService is in the same directory or package
@@ -741,8 +740,8 @@ class EbtgGui:
         
         try: btg_config["chunk_size"] = int(self.btg_chunk_size_entry.get() or "6000")
         except ValueError: btg_config["chunk_size"] = 6000
-        try: btg_config["max_workers"] = int(self.btg_max_workers_entry.get() or str(os.cpu_count() or 1))
-        except ValueError: btg_config["max_workers"] = os.cpu_count() or 1
+        try: btg_config["max_workers"] = int(self.btg_max_workers_entry.get() or "4")
+        except ValueError: btg_config["max_workers"] = 4
         try: btg_config["requests_per_minute"] = int(self.btg_rpm_entry.get() or "60")
         except ValueError: btg_config["requests_per_minute"] = 60
 
@@ -837,7 +836,7 @@ class EbtgGui:
         self.btg_chunk_size_entry.delete(0, tk.END)
         self.btg_chunk_size_entry.insert(0, str(config.get("chunk_size", 6000)))
         self.btg_max_workers_entry.delete(0, tk.END)
-        self.btg_max_workers_entry.insert(0, str(config.get("max_workers", os.cpu_count() or 1)))
+        self.btg_max_workers_entry.insert(0, str(config.get("max_workers", 4)))
         self.btg_rpm_entry.delete(0, tk.END)
         self.btg_rpm_entry.insert(0, str(config.get("requests_per_minute", 60)))
 

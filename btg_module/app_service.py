@@ -664,10 +664,10 @@ class AppService:
                         (chunks_to_process_with_indices[0][0] + 1 if chunks_to_process_with_indices else None) 
                     ))
             
-            max_workers = self.config.get("max_workers", os.cpu_count() or 1)
+            max_workers = self.config.get("max_workers", 4)
             if not isinstance(max_workers, int) or max_workers <= 0:
                 logger.warning(f"잘못된 max_workers 값 ({max_workers}), 기본값 (CPU 코어 수 또는 1)으로 설정합니다.")
-                max_workers = os.cpu_count() or 1
+                max_workers = 4
             
             logger.info(f"최대 {max_workers} 스레드로 병렬 번역 (대상: {len(chunks_to_process_with_indices)} 청크)...")
 
