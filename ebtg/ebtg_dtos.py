@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 @dataclass
 class BtgPlainTextTranslationRequestDto:
@@ -94,7 +94,44 @@ class EpubProcessingProgressDTO:
     errors_count: int = 0
     status_message: str = ""
 
+# --- DTOs for New Architecture (Text-based translation with image preservation) ---
 
+@dataclass
+class TranslateTextChunksRequestDto:
+    """
+    EBTG -> BTG: 텍스트 청크 목록의 번역 및 XHTML 조각 생성을 요청하는 DTO.
+    (BtgIntegrationService를 통해 BTG AppService로 전달될 데이터의 EBTG 측 표현)
+    """
+    text_chunks: List[str]  # 번역할 순수 텍스트 조각들
+    target_language: str    # 번역 목표 언어
+    # 각 텍스트 청크를 번역하고 XHTML 조각으로 만들기 위한 프롬프트 템플릿.
+    # 예: "Translate to {target_language} and wrap in <p>: {{slot}}. Lorebook: {ebtg_lorebook_context}"
+    # {target_language}와 {ebtg_lorebook_context}는 BtgIntegrationService에서 채워지고,
+    # {{slot}}은 BTG 모듈 내부에서 각 text_chunk로 대체됩니다.
+    prompt_template_for_fragment_generation: str
+    ebtg_lorebook_context: Optional[str] = None # EBTG에서 추출/필터링된 로어북 컨텍스트
+
+@dataclass
+class TranslateTextChunksResponseDto:
+    """
+    BTG -> EBTG: 번역된 XHTML 조각 목록을 반환하는 DTO.
+    """
+    translated_xhtml_fragments: List[str] # 번역되고 XHTML로 감싸진 조각들 (예: ["<p>안녕</p>", "<p>세계</p>"])
+    # 각 청크별 오류 정보를 담을 수 있음. 예: [{"chunk_index": 0, "error_message": "API timeout"}]
+    errors: Optional[List[Dict[str, Any]]] = None
+
+@dataclass
+class TextBlock:
+    text_content: str # 순수 텍스트 내용
+
+@dataclass
+class ImageInfo:
+    original_tag_string: str # 원본 <img> 태그 전체 문자열
+    src: str                 # 이미지 소스 경로
+    original_alt: str        # 원본 alt 텍스트
+    translated_alt: Optional[str] = None # 번역된 alt 텍스트
+
+ExtractedContentElement = Union[TextBlock, ImageInfo]
 
 
 if __name__ == '__main__':
@@ -167,3 +204,29 @@ if __name__ == '__main__':
         errors="Failed to generate XHTML due to content policy violation."
     )
     print(f"XHTML Generation Response DTO (BTG->EBTG - Error): {xhtml_gen_res_error}")
+
+    print("\n--- New Architecture DTOs 예시 ---")
+    # TextBlock 및 ImageInfo 예시
+    text_block_example = TextBlock(text_content="이것은 텍스트 블록입니다.")
+    image_info_example = ImageInfo(
+        original_tag_string='<img src="image.png" alt="Original alt text">',
+        src="image.png",
+        original_alt="Original alt text"
+    )
+    print(f"TextBlock 예시: {text_block_example}")
+    print(f"ImageInfo 예시: {image_info_example}")
+
+    # TranslateTextChunksRequestDto 예시
+    text_chunks_req = TranslateTextChunksRequestDto(
+        text_chunks=["First sentence.", "Second sentence with alt: Image description."],
+        target_language="ko",
+        prompt_template_for_fragment_generation="Translate to {target_language}: {{slot}}",
+        ebtg_lorebook_context="Character: Alice - 주인공"
+    )
+    print(f"TranslateTextChunksRequestDto 예시: {text_chunks_req}")
+
+    # TranslateTextChunksResponseDto 예시
+    text_chunks_res = TranslateTextChunksResponseDto(
+        translated_xhtml_fragments=["<p>첫 번째 문장입니다.</p>", "<p>두 번째 문장 (alt: 이미지 설명).</p>"]
+    )
+    print(f"TranslateTextChunksResponseDto 예시: {text_chunks_res}")

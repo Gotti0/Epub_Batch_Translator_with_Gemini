@@ -18,7 +18,7 @@ from common.progress_persistence_service import ProgressPersistenceService
 from .epub_validation_service import EpubValidationService # Import EpubValidationService
 from .quality_monitor_service import QualityMonitorService # Import QualityMonitorService
 from .ebtg_exceptions import EbtgProcessingError, XhtmlExtractionError, ApiXhtmlGenerationError
-from .ebtg_dtos import EpubProcessingProgressDTO # DTO 추가
+from .ebtg_dtos import EpubProcessingProgressDTO, ExtractedContentElement, TextBlock, ImageInfo # DTO 추가
 from .config_manager import EbtgConfigManager # Assuming a config manager for EBTG
 
 # Assuming BTG module is accessible
@@ -503,10 +503,11 @@ class EbtgAppService:
                 try:
                     original_xhtml_content_str = xhtml_item.original_content_bytes.decode('utf-8', errors='replace')
                     
-                    content_items = self.html_extractor.extract_content(original_xhtml_content_str)
+                    # Phase 2: Extract ExtractedContentElement list
+                    extracted_elements: List[ExtractedContentElement] = self.html_extractor.extract_content(original_xhtml_content_str)
 
-                    if not content_items:
-                        logger.warning(f"No content items extracted from {item_filename}. Keeping original content.")
+                    if not extracted_elements:
+                        logger.warning(f"No content elements extracted from {item_filename} by SimplifiedHtmlExtractor. Keeping original content.")
                         self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "skipped_empty_content")
                         continue
 
@@ -519,119 +520,109 @@ class EbtgAppService:
                     segment_has_errors = False
 
                     if not item_segments: # Should not happen if content_items was not empty
-                        logger.warning(f"Content segmentation returned no segments for {item_filename}. Keeping original.")
+                        logger.warning(f"Content segmentation (old logic) returned no segments for {item_filename}. This part needs update for new architecture. Keeping original for now.")
                         self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "skipped_no_segments")
                         continue
 
-                    # Prepare tasks for the ThreadPoolExecutor
-                    tasks_for_item_segments: List[SegmentProcessingTask] = []
-                    for i, segment_items_data in enumerate(item_segments):
-                        ebtg_lorebook_context_str = self._get_relevant_lorebook_context_for_items(segment_items_data)
-                        tasks_for_item_segments.append(
-                            SegmentProcessingTask(
-                                xhtml_item_id=item_id,
-                                xhtml_item_filename=item_filename,
-                                original_xhtml_content_str=original_xhtml_content_str, # Pass for fallback
-                                segment_items_data=segment_items_data,
-                                segment_index=i,
-                                total_segments_for_item=len(item_segments),
-                                target_language=target_language,
-                                prompt_template_for_item=universal_prompt_template, # Pass the raw universal template
-                                ebtg_lorebook_context_for_segment=ebtg_lorebook_context_str
-                            )
-                        )
+                    # --- Start: New logic for Phase 2 (Text and Alt-Text Extraction) ---
+                    texts_for_translation_for_item: List[str] = []
+                    # Map to link an original alt text's unique ID to its ImageInfo object and its index in texts_for_translation_for_item
+                    # Key: unique_alt_text_id (e.g., "item_filename_alt_0"), Value: (ImageInfo_object, index_in_texts_for_translation_for_item)
+                    alt_text_details_map: Dict[str, Tuple[ImageInfo, int]] = {}
+                    alt_text_id_counter = 0
 
-                    # Use ThreadPoolExecutor to process segments in parallel
-                    # Using BTG's max_workers for segment processing parallelism within EBTG
-                    num_workers = self.btg_app_service.config.get("max_workers", 4)
-                    logger.info(f"Processing {len(tasks_for_item_segments)} segments for {item_filename} in parallel with {num_workers} workers.")
+                    for element_idx, element_obj in enumerate(extracted_elements):
+                        if isinstance(element_obj, TextBlock):
+                            if element_obj.text_content.strip():
+                                texts_for_translation_for_item.append(element_obj.text_content)
+                        elif isinstance(element_obj, ImageInfo):
+                            # ImageInfo object itself is preserved in extracted_elements.
+                            # If it has alt text, add that to the list for translation.
+                            if element_obj.original_alt and element_obj.original_alt.strip():
+                                texts_for_translation_for_item.append(element_obj.original_alt)
+                                # Create a unique ID for this alt text to map it back after translation.
+                                unique_alt_id = f"{Path(item_filename).stem}_alt_{alt_text_id_counter}"
+                                alt_text_details_map[unique_alt_id] = (element_obj, len(texts_for_translation_for_item) - 1)
+                                alt_text_id_counter += 1
                     
-                    segment_results_map: Dict[int, Tuple[Optional[str], Optional[Exception]]] = {}
+                    logger.info(f"For {item_filename}: Extracted {len(texts_for_translation_for_item)} text/alt-text strings for translation.")
+                    logger.info(f"For {item_filename}: Found {len(alt_text_details_map)} alt texts to translate.")
+                    logger.debug(f"For {item_filename}: texts_for_translation_for_item (first 3): {texts_for_translation_for_item[:3]}")
+                    logger.debug(f"For {item_filename}: alt_text_details_map (first 3 items): {list(alt_text_details_map.items())[:3]}")
 
-                    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                        future_to_task_map = {
-                            executor.submit(self._process_single_segment_task_wrapper, task): task
-                            for task in tasks_for_item_segments
-                        }
+                    # --- End: New logic for Phase 2 ---
 
-                        for future in as_completed(future_to_task_map):
-                            task_item_id, task_segment_index, generated_xhtml, error = future.result()
-                            segment_results_map[task_segment_index] = (generated_xhtml, error)
-                            if error:
-                                logger.error(f"Error processing segment {task_segment_index} for {item_filename}: {error}")
-                                segment_has_errors = True # Mark that at least one segment failed
-
-                    # After all segments for the current xhtml_item are processed (or attempted)
-                    if segment_has_errors:
-                        logger.error(f"One or more segments failed for {item_filename}. Using fallback content for the entire item.")
-                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
-                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_parallel_segment_processing_fallback", "Error during parallel segment processing.")
-                        files_with_errors += 1
-                        continue # Move to the next xhtml_item
-
-                    # If all segments processed without critical errors reported by the wrapper (None content + Exception)
-                    # Reconstruct the final_xhtml_parts in order
-                    for i in range(len(item_segments)):
-                        generated_xhtml_for_segment, error_for_segment = segment_results_map.get(i, (None, None))
-                        if error_for_segment: # This implies a critical failure for this segment
-                            logger.error(f"Segment {i} for {item_filename} had an error even if not caught by outer 'segment_has_errors': {error_for_segment}. This should ideally be caught earlier.")
-                            segment_has_errors = True
-                            break
-                        if generated_xhtml_for_segment is None:
-                            logger.error(f"Segment {i} for {item_filename} returned no content. This part will be missing.")
-                            segment_has_errors = True
-                            break
-                        final_xhtml_parts.append(generated_xhtml_for_segment)
+                    # The following block is the OLD logic for segmenting and processing based on List[Dict[str, Any]]
+                    # This will need to be replaced by logic that handles `texts_for_translation_for_item`
+                    # and then reassembles using `extracted_elements` and `alt_text_details_map`.
+                    # For now, we'll comment it out and use fallback/original content.
                     
-                    if segment_has_errors: # Check again after assembling parts
-                        logger.error(f"Fallback for {item_filename} due to errors during segment result assembly.")
+                    # <<<< OLD LOGIC BLOCK START >>>>
+                    # # Prepare tasks for the ThreadPoolExecutor
+                    # tasks_for_item_segments: List[SegmentProcessingTask] = []
+                    # for i, segment_items_data in enumerate(item_segments): # item_segments was from old content_items
+                    #     ebtg_lorebook_context_str = self._get_relevant_lorebook_context_for_items(segment_items_data)
+                    #     tasks_for_item_segments.append(
+                    #         SegmentProcessingTask(
+                    #             xhtml_item_id=item_id,
+                    #             xhtml_item_filename=item_filename,
+                    #             original_xhtml_content_str=original_xhtml_content_str, 
+                    #             segment_items_data=segment_items_data,
+                    #             segment_index=i,
+                    #             total_segments_for_item=len(item_segments),
+                    #             target_language=target_language,
+                    #             prompt_template_for_item=universal_prompt_template, 
+                    #             ebtg_lorebook_context_for_segment=ebtg_lorebook_context_str
+                    #         )
+                    #     )
+                    # 
+                    # # Use ThreadPoolExecutor to process segments in parallel
+                    # num_workers = self.btg_app_service.config.get("max_workers", 4)
+                    # logger.info(f"Processing {len(tasks_for_item_segments)} segments for {item_filename} in parallel with {num_workers} workers.")
+                    # segment_results_map: Dict[int, Tuple[Optional[str], Optional[Exception]]] = {}
+                    # with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                    #     future_to_task_map = {
+                    #         executor.submit(self._process_single_segment_task_wrapper, task): task
+                    #         for task in tasks_for_item_segments
+                    #     }
+                    #     for future in as_completed(future_to_task_map):
+                    #         task_item_id, task_segment_index, generated_xhtml, error = future.result()
+                    #         segment_results_map[task_segment_index] = (generated_xhtml, error)
+                    #         if error:
+                    #             logger.error(f"Error processing segment {task_segment_index} for {item_filename}: {error}")
+                    #             segment_has_errors = True 
+                    # 
+                    # if segment_has_errors:
+                    #     logger.error(f"One or more segments failed for {item_filename}. Using fallback content for the entire item.")
+                    #     # ... (fallback logic) ...
+                    #     continue 
+                    # 
+                    # # ... (rest of the old segment assembly and validation logic) ...
+                    # <<<< OLD LOGIC BLOCK END >>>>
+
+                    # Placeholder for Phase 3, 4, 5:
+                    # 1. Send `texts_for_translation_for_item` to BTG for translation.
+                    #    This will return a list of translated strings (body texts and alt texts).
+                    # 2. Reassemble the XHTML:
+                    #    - Iterate through `extracted_elements`.
+                    #    - If TextBlock, use the corresponding translated text.
+                    #    - If ImageInfo, use its original `src`, and find its translated alt text using `alt_text_details_map`.
+                    #    - Construct the new XHTML string.
+                    # For now, as this logic is not yet implemented, we'll use fallback or original.
+                    logger.warning(f"Phase 3-5 (translation of extracted texts and reassembly) not yet implemented for {item_filename}. Using fallback content.")
+                    if texts_for_translation_for_item: # If there was anything to translate
                         fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
                         self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_segment_assembly_fallback", "Error assembling segment results.")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "pending_reassembly_fallback", "New architecture text extraction complete, reassembly pending.")
                         files_with_errors += 1
-                        continue
+                    else: # No text or alt-text found, keep original
+                        logger.info(f"No translatable text found in {item_filename}. Keeping original content.")
+                        self.epub_processor.update_xhtml_content(item_id, original_xhtml_content_str.encode('utf-8'))
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "kept_original_no_translatable_text")
+                        generated_xhtml_for_item_successfully = True # Considered "successful" as it's intentionally kept.
 
-                    if not final_xhtml_parts:
-                        logger.warning(f"No XHTML parts generated for {item_filename} after parallel processing. Using fallback.")
-                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
-                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_no_parts_parallel_fallback")
-                        files_with_errors += 1
-                        continue
-
-                    final_generated_xhtml_for_item: str
-                    if len(item_segments) > 1: # If it was processed in fragments
-                        concatenated_body_content = "\n".join(final_xhtml_parts)
-                        final_generated_xhtml_for_item = self._wrap_body_fragments_in_full_xhtml(
-                            concatenated_body_content, Path(item_filename).stem, target_language
-                        )
-                        logger.info(f"Assembled {len(item_segments)} parallel-processed fragments into a full XHTML for {item_filename}.")
-                    else: # Processed as a single document (or single segment)
-                        final_generated_xhtml_for_item = final_xhtml_parts[0]
-
-                    # Final validation of the assembled/single-segment XHTML
-                    if not self._is_well_formed_xml(final_generated_xhtml_for_item):
-                        logger.error(f"Final assembled XHTML for {item_filename} (from parallel segments) is not well-formed. Using fallback content.")
-                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
-                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_final_validation_parallel_fallback", "Final generated content from parallel segments is not well-formed XML.")
-                        files_with_errors += 1
-                        continue
-                    
-                    # Content omission check for the fully assembled item
-                    if self.config.get("perform_content_omission_check", True):
-                        passed_omission_check, omission_warnings = self.quality_monitor.check_content_omission(
-                            content_items, final_generated_xhtml_for_item, item_filename
-                        )
-                        if not passed_omission_check:
-                            logger.warning(f"Content omission check failed for {item_filename}: {omission_warnings}. Content might be incomplete.")
-                        else:
-                            logger.info(f"Content omission check passed for {item_filename}.")
-
-                    self.epub_processor.update_xhtml_content(item_id, final_generated_xhtml_for_item.encode('utf-8'))
-                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "success")
-                    generated_xhtml_for_item_successfully = True
+                    # If the above placeholder logic results in success (e.g. keeping original)
+                    # generated_xhtml_for_item_successfully = True 
 
                 except (XhtmlExtractionError, ApiXhtmlGenerationError, BtgServiceException, UnicodeDecodeError) as e_proc:
                     logger.error(f"Processing error for {item_filename}: {e_proc}. Using fallback content.")
