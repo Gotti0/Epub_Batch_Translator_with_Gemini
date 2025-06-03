@@ -188,6 +188,9 @@ class EbtgGui:
         self.ebtg_app_service: EbtgAppService | None = None
         self.translation_thread: threading.Thread | None = None
         self._stop_event = threading.Event() 
+        
+        self.last_progress_dto: Optional[EpubProcessingProgressDTO] = None
+        self.time_update_job_id: Optional[str] = None
 
         # --- Main Frame ---
         main_frame = ttk.Frame(self.root, padding="10")
@@ -983,6 +986,28 @@ class EbtgGui:
             daemon=True
         )
         self.translation_thread.start()
+            self._start_periodic_time_update() # 주기적 시간 업데이트 시작
+
+    def _start_periodic_time_update(self):
+        if not self.root.winfo_exists():
+            return
+        if self.time_update_job_id:
+            self.root.after_cancel(self.time_update_job_id)
+        
+        self.time_update_job_id = self.root.after(1000, self._update_time_display_periodically)
+
+    def _update_time_display_periodically(self):
+        if not self.root.winfo_exists():
+            self.time_update_job_id = None
+            return
+
+        is_running = self.translation_thread and self.translation_thread.is_alive() and not self._stop_event.is_set()
+
+        if is_running and self.last_progress_dto and self.translation_start_time is not None:
+            self._do_update_epub_progress_widgets(self.last_progress_dto)
+            self.time_update_job_id = self.root.after(1000, self._update_time_display_periodically)
+        else:
+            self.time_update_job_id = None
 
     def request_stop_translation(self):
         if self.translation_thread and self.translation_thread.is_alive():
@@ -1003,6 +1028,7 @@ class EbtgGui:
         This method is called via self.root.after() to ensure it runs in the main GUI thread.
         `progress_dto` is an instance of the presumed `EpubProcessingProgressDTO`.
         """
+        self.last_progress_dto = progress_dto # 최신 DTO 저장
         # Schedule the actual GUI update to run in the main thread
         if self.root.winfo_exists():
             self.root.after(0, self._do_update_epub_progress_widgets, progress_dto)
@@ -1021,10 +1047,12 @@ class EbtgGui:
         status_msg = f"{progress_dto.status_message} "
         if progress_dto.current_file_name:
             status_msg += f"({progress_dto.current_file_name}) "
-        status_msg += f"{progress_dto.processed_files}/{progress_dto.total_files} 파일"
+        
+        # 파일 진행률 부분은 DTO에서 가져오고, 시간 부분은 실시간으로 계산
+        files_progress_str = f"{progress_dto.processed_files}/{progress_dto.total_files} 파일"
         
         time_info_str = ""
-        if self.translation_start_time and progress_dto.total_files > 0:
+        if self.translation_start_time is not None and progress_dto.total_files >= 0: # total_files가 0일 수도 있음
             elapsed_seconds = time.monotonic() - self.translation_start_time
             formatted_elapsed = self._format_time(elapsed_seconds)
             time_info_str = f" (경과: {formatted_elapsed}"
@@ -1037,7 +1065,7 @@ class EbtgGui:
                 time_info_str += f", ETA: {formatted_eta}"
             time_info_str += ")"
         
-        status_msg += time_info_str
+        status_msg = f"{files_progress_str}{time_info_str}"
 
         if progress_dto.errors_count > 0: status_msg += f", Errors: {progress_dto.errors_count}"
         self.status_var.set(status_msg)
