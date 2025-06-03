@@ -38,6 +38,7 @@ class SegmentProcessingTask:
     total_segments_for_item: int
     target_language: str
     # The base prompt template for the entire item, to be adapted for fragments if necessary.
+    ebtg_lorebook_context_for_segment: str # Added for pre-calculated lorebook context
     prompt_template_for_item: str
 
 logger = logging.getLogger(__name__) # Or use a setup_logger like in BTG
@@ -300,6 +301,14 @@ class EbtgAppService:
             )
             current_prompt_instructions = prompt_cleaned_for_fragment + fragment_directive
         else:
+            # This is for a single segment (entire document)
+            # The prompt_template_for_item is already the full universal prompt.
+            # We just need to replace {target_language} and {{lorebook_context}}.
+            # {{lorebook_context}} will be replaced using task.ebtg_lorebook_context_for_segment.
+            # {target_language} will be replaced from task.target_language.
+            # So, task.prompt_template_for_item should be the raw universal template here.
+            # The replacement of {target_language} and {{lorebook_context}} will happen next.
+
             segment_id_prefix = task.xhtml_item_filename
             current_prompt_instructions = task.prompt_template_for_item.replace(
                 "{target_language}", task.target_language
@@ -307,12 +316,19 @@ class EbtgAppService:
 
         logger.info(f"Requesting XHTML for {'fragment' if is_fragment_request else 'document'}: {segment_id_prefix} ({len(task.segment_items_data)} items)")
         
+        # Inject EBTG-managed lorebook context (now using the pre-calculated one from the task)
+        if "{{lorebook_context}}" in current_prompt_instructions:
+            final_prompt_for_btg = current_prompt_instructions.replace("{{lorebook_context}}", task.ebtg_lorebook_context_for_segment)
+            logger.info(f"EBTG: Injected pre-calculated lorebook context for {segment_id_prefix}. Context (first 100 chars): {task.ebtg_lorebook_context_for_segment[:100]}")
+        else:
+            final_prompt_for_btg = current_prompt_instructions
+            logger.warning(f"EBTG: '{{{{lorebook_context}}}}' placeholder not found in prompt for {segment_id_prefix}, EBTG lorebook not injected.")
         try:
             generated_segment_xhtml_str = self.btg_integration.generate_xhtml(
                 id_prefix=segment_id_prefix,
                 content_items=task.segment_items_data,
                 target_language=task.target_language,
-                prompt_instructions=current_prompt_instructions
+                prompt_instructions=final_prompt_for_btg # Use the prompt with lorebook injected
             )
 
             if not generated_segment_xhtml_str:
@@ -501,123 +517,80 @@ class EbtgAppService:
                         self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "skipped_no_segments")
                         continue
 
-                    for i, segment_items in enumerate(item_segments):
-                        # Determine segment ID and prompt based on whether it's a fragment or full doc
-                        segment_id_prefix: str
-                        current_prompt_instructions: str
-                        is_fragment = len(item_segments) > 1
-
-                        # Construct the prompt for BtgIntegrationService based on the universal prompt.
-                        # BtgIntegrationService will further enhance this with its own specific instructions.
-                        prompt_for_btg_integration: str
-
-                        if is_fragment:
-                            segment_id_prefix = f"{Path(item_filename).stem}_part_{i+1}{Path(item_filename).suffix}"
-                            
-                            # 1. Get the base universal prompt, language resolved.
-                            base_universal_prompt = universal_prompt_template.replace('{target_language}', target_language)
-
-                            # 2. Clean the base prompt for XHTML fragment context:
-                            #    Remove or adapt placeholders like {{content_items}}, {{slot}} as items are externally provided.
-                            #    Remove {{lorebook_context}} if not filled by EBTG for XHTML generation.
-                            prompt_cleaned_for_fragment = base_universal_prompt
-                            # Replace the main data section with a note that items are provided separately
-                            prompt_cleaned_for_fragment = re.sub(
-                                r"## 번역할 원문.*?({{#if content_items}}.*?{{/if}})",
-                                "## 번역할 원문\n(구조화된 콘텐츠 항목은 이 지침 다음에 별도의 JSON 형식으로 제공됩니다. 해당 항목들을 처리해주세요.)",
-                                prompt_cleaned_for_fragment, flags=re.DOTALL | re.IGNORECASE
+                    # Prepare tasks for the ThreadPoolExecutor
+                    tasks_for_item_segments: List[SegmentProcessingTask] = []
+                    for i, segment_items_data in enumerate(item_segments):
+                        ebtg_lorebook_context_str = self._get_relevant_lorebook_context_for_items(segment_items_data)
+                        tasks_for_item_segments.append(
+                            SegmentProcessingTask(
+                                xhtml_item_id=item_id,
+                                xhtml_item_filename=item_filename,
+                                original_xhtml_content_str=original_xhtml_content_str, # Pass for fallback
+                                segment_items_data=segment_items_data,
+                                segment_index=i,
+                                total_segments_for_item=len(item_segments),
+                                target_language=target_language,
+                                prompt_template_for_item=universal_prompt_template, # Pass the raw universal template
+                                ebtg_lorebook_context_for_segment=ebtg_lorebook_context_str
                             )
-                            if "{{lorebook_context}}" in prompt_cleaned_for_fragment: # If EBTG doesn't fill it here
-                                prompt_cleaned_for_fragment = prompt_cleaned_for_fragment.replace("{{lorebook_context}}", "(로어북 컨텍스트는 이 XHTML 조각 생성 작업의 일부가 아닐 수 있습니다.)")
-
-                            # 3. Add concise fragment-specific instructions.
-                            fragment_directive = (
-                                "\n\nIMPORTANT INSTRUCTION FOR THIS SPECIFIC TASK (FRAGMENT MODE):\n"
-                                "You are currently processing a FRAGMENT of a larger document. "
-                                "Your output for THIS task must be ONLY the XHTML content for the body of this fragment. "
-                                "Do NOT include `<html>`, `<head>`, or `<body>` tags in your response. "
-                                "The content items for this fragment will be provided in a JSON block following all instructions."
-                            )
-                            prompt_for_btg_integration = prompt_cleaned_for_fragment + fragment_directive
-                        else:
-                            segment_id_prefix = item_filename
-                            prompt_for_btg_integration = universal_prompt_template.replace(
-                                "{target_language}", target_language # Target language already in the prompt
-                            )
-                        
-                        # Inject EBTG-managed lorebook context
-                        ebtg_lorebook_context_str = self._get_relevant_lorebook_context_for_items(segment_items)
-                        if "{{lorebook_context}}" in prompt_for_btg_integration:
-                            current_prompt_instructions = prompt_for_btg_integration.replace("{{lorebook_context}}", ebtg_lorebook_context_str)
-                            logger.info(f"EBTG: Injected lorebook context for {segment_id_prefix}. Context (first 100 chars): {ebtg_lorebook_context_str[:100]}")
-                        else:
-                            current_prompt_instructions = prompt_for_btg_integration
-                            logger.warning(f"EBTG: '{{{{lorebook_context}}}}' placeholder not found in prompt for {segment_id_prefix}, EBTG lorebook not injected.")
-
-                        
-                        logger.info(f"Requesting XHTML for {'fragment' if is_fragment else 'document'}: {segment_id_prefix} ({len(segment_items)} items)")
-                        
-                        generated_segment_xhtml_str = self.btg_integration.generate_xhtml(
-                            id_prefix=segment_id_prefix,
-                            content_items=segment_items,
-                            target_language=target_language,
-                            prompt_instructions=current_prompt_instructions # Pass the determined prompt
                         )
 
-                        if generated_segment_xhtml_str:
-                            actual_segment_content_to_append = generated_segment_xhtml_str
-                            if is_fragment: # If we requested a fragment
-                                # Check if the API (possibly via BtgAppService internal wrapping) returned a full document
-                                temp_soup_for_frag_check = BeautifulSoup(generated_segment_xhtml_str, 'html.parser')
-                                html_tag_in_frag = temp_soup_for_frag_check.find('html')
-                                body_tag_in_frag = temp_soup_for_frag_check.find('body')
+                    # Use ThreadPoolExecutor to process segments in parallel
+                    # Using BTG's max_workers for segment processing parallelism within EBTG
+                    num_workers = self.btg_app_service.config.get("max_workers", 4)
+                    logger.info(f"Processing {len(tasks_for_item_segments)} segments for {item_filename} in parallel with {num_workers} workers.")
+                    
+                    segment_results_map: Dict[int, Tuple[Optional[str], Optional[Exception]]] = {}
 
-                                if html_tag_in_frag and body_tag_in_frag: # It's likely a full document
-                                    logger.debug(f"Segment {segment_id_prefix} (requested as fragment) appears to be a full document. Extracting body content.")
-                                    extracted_body_content = "".join(str(c) for c in body_tag_in_frag.contents).strip()
-                                    if extracted_body_content:
-                                        actual_segment_content_to_append = extracted_body_content
-                                    elif generated_segment_xhtml_str.strip(): # Body was empty but original was not
-                                        logger.warning(f"Extracted empty body from full-doc fragment {segment_id_prefix}. Using original fragment string as fallback for this part.")
-                                        # actual_segment_content_to_append remains generated_segment_xhtml_str
-                                    # If extracted_body_content is empty and original was also effectively empty, it's fine.
-                                # else: It's not a full document, assume it's already the desired fragment content.
+                    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                        future_to_task_map = {
+                            executor.submit(self._process_single_segment_task_wrapper, task): task
+                            for task in tasks_for_item_segments
+                        }
 
-                            # Now validate actual_segment_content_to_append
-                            is_valid_segment, validation_errors = self.quality_monitor.validate_xhtml_structure(
-                                actual_segment_content_to_append, segment_id_prefix
-                            )
-                            if is_valid_segment:
-                                logger.info(f"Successfully generated and validated XHTML segment content: {segment_id_prefix}.")
-                                final_xhtml_parts.append(actual_segment_content_to_append)
-                            else:
-                                logger.error(f"XHTML segment content for {segment_id_prefix} is not well-formed. Errors: {validation_errors}. This part will be problematic.")
-                                final_xhtml_parts.append(f"<!-- MALFORMED FRAGMENT CONTENT: {segment_id_prefix} -->") # Or skip
-                                segment_has_errors = True
-                            
-                            # Content omission check for the segment (optional, might be too granular)
-                            # _, omission_warnings_segment = self.quality_monitor.check_content_omission(segment_items, generated_segment_xhtml_str, segment_id_prefix)
-                            # if omission_warnings_segment:
-                            #    logger.warning(f"Segment {segment_id_prefix} - potential content omissions: {omission_warnings_segment}")
-                        
-                        else:
-                            logger.error(f"Failed to generate XHTML for segment {segment_id_prefix}. This part will be missing.")
-                            segment_has_errors = True
-                            break 
+                        for future in as_completed(future_to_task_map):
+                            task_item_id, task_segment_index, generated_xhtml, error = future.result()
+                            segment_results_map[task_segment_index] = (generated_xhtml, error)
+                            if error:
+                                logger.error(f"Error processing segment {task_segment_index} for {item_filename}: {error}")
+                                segment_has_errors = True # Mark that at least one segment failed
 
+                    # After all segments for the current xhtml_item are processed (or attempted)
                     if segment_has_errors:
-                        logger.error(f"Due to errors in one or more segments, fallback content will be generated for {item_filename}.")
+                        logger.error(f"One or more segments failed for {item_filename}. Using fallback content for the entire item.")
                         fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
                         self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_segment_processing_fallback", "Error during segment processing, used fallback.")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_parallel_segment_processing_fallback", "Error during parallel segment processing.")
                         files_with_errors += 1
-                        continue 
+                        continue # Move to the next xhtml_item
+
+                    # If all segments processed without critical errors reported by the wrapper (None content + Exception)
+                    # Reconstruct the final_xhtml_parts in order
+                    for i in range(len(item_segments)):
+                        generated_xhtml_for_segment, error_for_segment = segment_results_map.get(i, (None, None))
+                        if error_for_segment: # This implies a critical failure for this segment
+                            logger.error(f"Segment {i} for {item_filename} had an error even if not caught by outer 'segment_has_errors': {error_for_segment}. This should ideally be caught earlier.")
+                            segment_has_errors = True
+                            break
+                        if generated_xhtml_for_segment is None:
+                            logger.error(f"Segment {i} for {item_filename} returned no content. This part will be missing.")
+                            segment_has_errors = True
+                            break
+                        final_xhtml_parts.append(generated_xhtml_for_segment)
+                    
+                    if segment_has_errors: # Check again after assembling parts
+                        logger.error(f"Fallback for {item_filename} due to errors during segment result assembly.")
+                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
+                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_segment_assembly_fallback", "Error assembling segment results.")
+                        files_with_errors += 1
+                        continue
 
                     if not final_xhtml_parts:
-                        logger.warning(f"No XHTML parts generated for {item_filename} after segmentation. Using fallback.")
+                        logger.warning(f"No XHTML parts generated for {item_filename} after parallel processing. Using fallback.")
                         fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
                         self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_no_parts_generated_fallback")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_no_parts_parallel_fallback")
                         files_with_errors += 1
                         continue
 
@@ -627,17 +600,29 @@ class EbtgAppService:
                         final_generated_xhtml_for_item = self._wrap_body_fragments_in_full_xhtml(
                             concatenated_body_content, Path(item_filename).stem, target_language
                         )
-                        logger.info(f"Assembled {len(item_segments)} fragments into a full XHTML for {item_filename}.")
-                    else: # Processed as a single document
+                        logger.info(f"Assembled {len(item_segments)} parallel-processed fragments into a full XHTML for {item_filename}.")
+                    else: # Processed as a single document (or single segment)
                         final_generated_xhtml_for_item = final_xhtml_parts[0]
 
+                    # Final validation of the assembled/single-segment XHTML
                     if not self._is_well_formed_xml(final_generated_xhtml_for_item):
-                        logger.error(f"Final assembled XHTML for {item_filename} is not well-formed. Using fallback content.")
+                        logger.error(f"Final assembled XHTML for {item_filename} (from parallel segments) is not well-formed. Using fallback content.")
                         fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
                         self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_final_validation_fallback", "Final generated content is not well-formed XML.")
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_final_validation_parallel_fallback", "Final generated content from parallel segments is not well-formed XML.")
                         files_with_errors += 1
                         continue
+                    
+                    # Content omission check for the fully assembled item
+                    if self.config.get("perform_content_omission_check", True):
+                        passed_omission_check, omission_warnings = self.quality_monitor.check_content_omission(
+                            content_items, final_generated_xhtml_for_item, item_filename
+                        )
+                        if not passed_omission_check:
+                            logger.warning(f"Content omission check failed for {item_filename}: {omission_warnings}. Content might be incomplete.")
+                        else:
+                            logger.info(f"Content omission check passed for {item_filename}.")
+
                     self.epub_processor.update_xhtml_content(item_id, final_generated_xhtml_for_item.encode('utf-8'))
                     self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "success")
                     generated_xhtml_for_item_successfully = True
