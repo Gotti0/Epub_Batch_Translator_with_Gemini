@@ -90,7 +90,16 @@ class EpubProcessorService:
             for m_value in metadata:
                 new_book.add_metadata('DC', key, m_value[0], others=m_value[1] if len(m_value) > 1 else None)
         
-        new_book.set_identifier(self.book.get_identifier())
+        # Get identifier metadata
+        identifier_meta = self.book.get_metadata('DC', 'identifier')
+        if identifier_meta:
+            # Assuming the first identifier is the primary one
+            new_book.set_identifier(identifier_meta[0][0])
+        else:
+            logger.warning("Original EPUB has no DC:identifier metadata. A default one might be generated.")
+            # Optionally set a default or raise an error if an identifier is strictly required
+            # new_book.set_identifier("urn:uuid:placeholder-identifier") # Example default
+
         new_book.set_title(self.book.get_title())
         new_book.set_language(self.book.get_language())
         for author in self.book.get_metadata('DC', 'creator'):
