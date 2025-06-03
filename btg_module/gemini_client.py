@@ -436,15 +436,15 @@ class GeminiClient:
 
                     text_content_from_api: Optional[str] = None
                     if stream:
-                        response = self.client.models.generate_content_stream(
-                            model=effective_model_name, # type: ignore
-                            contents=final_contents, # type: ignore
-                            generation_config=genai_types.GenerationConfig(**effective_generation_config_params) if effective_generation_config_params else None # type: ignore
+                        response_iterator = self.client.models.generate_content_stream( # Renamed for clarity
+                            model=effective_model_name,
+                            contents=final_contents,
+                            **(effective_generation_config_params or {}) # Pass params directly
                         )
                         # 스트리밍 응답에서 JSON을 올바르게 처리하려면 추가 로직이 필요할 수 있음
                         # 여기서는 단순 텍스트 결합으로 가정
                         aggregated_parts = []
-                        for chunk_response in response:
+                        for chunk_response in response_iterator: # Iterate over the response
                             if self._is_content_safety_error(response=chunk_response):
                                 raise GeminiContentSafetyException("콘텐츠 안전 문제로 스트림의 일부 응답 차단")
                             if hasattr(chunk_response, 'text') and chunk_response.text:
@@ -458,9 +458,9 @@ class GeminiClient:
                         text_content_from_api = "".join(aggregated_parts)
                     else:
                         response = self.client.models.generate_content(
-                            model=effective_model_name, # type: ignore
-                            contents=final_contents, # type: ignore
-                            generation_config=genai_types.GenerationConfig(**effective_generation_config_params) if effective_generation_config_params else None # type: ignore
+                            model=effective_model_name,
+                            contents=final_contents,
+                            **(effective_generation_config_params or {}) # Pass params directly
                         )
 
                         if self._is_content_safety_error(response=response):
