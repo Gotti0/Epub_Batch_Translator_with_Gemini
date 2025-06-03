@@ -104,12 +104,17 @@ class TranslationService:
         self.config = config
         self.chunk_service = ChunkService()
         self.lorebook_entries_for_injection: List[LorebookEntryDTO] = [] # For new lorebook injection
-
-        if self.config.get("enable_dynamic_lorebook_injection", False):
+        
+        # EBTG가 BTG를 사용할 때는 EBTG가 로어북 컨텍스트를 관리하므로,
+        # BTG 자체의 로어북 로딩은 lorebook_json_path가 있고,
+        # enable_dynamic_lorebook_injection이 True일 때만 수행합니다.
+        # EBTG는 BTG AppService의 config를 업데이트할 때 enable_dynamic_lorebook_injection을
+        # EBTG의 설정에 따라 (또는 EBTG가 로어북을 직접 주입할 때는 False로) 설정할 수 있습니다.
+        if self.config.get("lorebook_json_path") and self.config.get("enable_dynamic_lorebook_injection", False):
             self._load_lorebook_data()
-            logger.info("동적 로어북 주입 활성화됨. 로어북 데이터 로드 시도.")
+            logger.info("BTG TranslationService: 동적 로어북 주입 활성화 및 경로 유효. 로어북 데이터 로드 시도.")
         else:
-            logger.info("동적 로어북 주입 비활성화됨. 로어북 컨텍스트 없이 번역합니다.")
+            logger.info("BTG TranslationService: 동적 로어북 주입 비활성화 또는 경로 없음. BTG 자체 로어북 컨텍스트 없이 번역합니다.")
 
     def _load_lorebook_data(self):
         # 통합된 로어북 경로 사용
@@ -173,61 +178,50 @@ class TranslationService:
             current_source_lang_for_lorebook_filtering = config_fallback_lang
             logger.warning(f"번역 출발 언어가 유효하게 설정되지 않았거나 'auto'가 아닙니다. 폴백 언어 '{current_source_lang_for_lorebook_filtering}'를 로어북 필터링에 사용.")
 
-        # 1. Dynamic Lorebook Injection
-        if self.config.get("enable_dynamic_lorebook_injection", False) and \
-           self.lorebook_entries_for_injection and \
-           "{{lorebook_context}}" in final_prompt:
+        # 1. Dynamic Lorebook Injection (BTG 자체 로직)
+        # EBTG에서 이미 {{lorebook_context}}를 채워넣었다면, 이 로직은 실행되지 않거나,
+        # 플레이스홀더가 없으므로 formatted_lorebook_context가 사용되지 않습니다.
+        if "{{lorebook_context}}" in final_prompt: # 플레이스홀더가 있을 때만 BTG 자체 로어북 주입 시도
+            if self.config.get("enable_dynamic_lorebook_injection", False) and self.lorebook_entries_for_injection:
+                relevant_entries_for_chunk: List[LorebookEntryDTO] = []
+                chunk_text_lower = chunk_text.lower() # For case-insensitive keyword matching
 
-            relevant_entries_for_chunk: List[LorebookEntryDTO] = []
-            chunk_text_lower = chunk_text.lower() # For case-insensitive keyword matching
+                if config_source_lang == "auto":
+                    logger.info("BTG: 자동 언어 감지 모드. 로어북은 키워드 일치로 필터링 후 LLM에 전달. LLM이 언어 기반 추가 필터링 수행.")
+                    for entry in self.lorebook_entries_for_injection:
+                        if entry.keyword.lower() in chunk_text_lower:
+                            relevant_entries_for_chunk.append(entry)
+                else:
+                    logger.info(f"BTG: 명시적 언어 모드 ('{current_source_lang_for_lorebook_filtering}'). 로어북을 언어 및 키워드 기준으로 필터링.")
+                    for entry in self.lorebook_entries_for_injection:
+                        if entry.source_language and \
+                           current_source_lang_for_lorebook_filtering and \
+                           entry.source_language.lower() != current_source_lang_for_lorebook_filtering.lower():
+                            logger.debug(f"BTG: 로어북 항목 '{entry.keyword}' 건너뜀: 언어 불일치 (로어북: {entry.source_language}, 번역 출발: {current_source_lang_for_lorebook_filtering}).")
+                            continue
+                        if entry.keyword.lower() in chunk_text_lower:
+                            relevant_entries_for_chunk.append(entry)
+                
+                logger.debug(f"BTG: 현재 청크에 대해 {len(relevant_entries_for_chunk)}개의 관련 로어북 항목 발견.")
 
-            if config_source_lang == "auto":
-                # "auto" 모드: LLM이 언어를 감지하고 로어북을 필터링하도록 지시.
-                # Python에서는 키워드 기반으로만 필터링하거나, 모든 로어북 항목을 전달.
-                # 여기서는 키워드 기반 필터링만 수행하고, LLM이 언어 필터링을 하도록 프롬프트에 명시.
-                logger.info("자동 언어 감지 모드: 로어북은 키워드 일치로 필터링 후 LLM에 전달. LLM이 언어 기반 추가 필터링 수행.")
-                for entry in self.lorebook_entries_for_injection:
-                    if entry.keyword.lower() in chunk_text_lower:
-                        relevant_entries_for_chunk.append(entry)
+                max_entries = self.config.get("max_lorebook_entries_per_chunk_injection", 3)
+                max_chars = self.config.get("max_lorebook_chars_per_chunk_injection", 500)
+                
+                formatted_lorebook_context = _format_lorebook_for_prompt(
+                    relevant_entries_for_chunk, max_entries, max_chars
+                )
+                
+                if formatted_lorebook_context != "로어북 컨텍스트 없음" and \
+                   formatted_lorebook_context != "로어북 컨텍스트 없음 (제한으로 인해 선택된 항목 없음)":
+                    logger.info(f"BTG: API 요청에 동적 로어북 컨텍스트 주입됨. 내용 일부: {formatted_lorebook_context[:100]}...")
+                    injected_keywords = [entry.keyword for entry in relevant_entries_for_chunk if entry.keyword.lower() in chunk_text_lower]
+                    if injected_keywords: logger.info(f"  🔑 BTG 주입 키워드: {', '.join(injected_keywords)}")
+                else:
+                    logger.debug(f"BTG: 동적 로어북 주입 시도했으나, 관련 항목 없거나 제한으로 실제 주입 내용 없음. 사용된 메시지: {formatted_lorebook_context}")
+                final_prompt = final_prompt.replace("{{lorebook_context}}", formatted_lorebook_context)
             else:
-                # 명시적 언어 설정 모드: Python에서 언어 및 키워드 기반으로 필터링.
-                logger.info(f"명시적 언어 모드 ('{current_source_lang_for_lorebook_filtering}'): 로어북을 언어 및 키워드 기준으로 필터링.")
-                for entry in self.lorebook_entries_for_injection:
-                    # 로어북 항목의 언어와 현재 번역 출발 언어가 일치하는지 확인
-                    if entry.source_language and \
-                       current_source_lang_for_lorebook_filtering and \
-                       entry.source_language.lower() != current_source_lang_for_lorebook_filtering.lower():
-                        logger.debug(f"로어북 항목 '{entry.keyword}' 건너뜀: 언어 불일치 (로어북: {entry.source_language}, 번역 출발: {current_source_lang_for_lorebook_filtering}).")
-                        continue
-
-                    if entry.keyword.lower() in chunk_text_lower:
-                        relevant_entries_for_chunk.append(entry)
-            
-            logger.debug(f"현재 청크에 대해 {len(relevant_entries_for_chunk)}개의 관련 로어북 항목 발견.")
-
-            # 1.b. Format the relevant entries for the prompt
-            max_entries = self.config.get("max_lorebook_entries_per_chunk_injection", 3)
-            max_chars = self.config.get("max_lorebook_chars_per_chunk_injection", 500)
-            
-            formatted_lorebook_context = _format_lorebook_for_prompt(
-                relevant_entries_for_chunk, max_entries, max_chars # Pass only relevant entries
-            )
-            
-            # Check if actual content was formatted (not just "없음" messages)
-            if formatted_lorebook_context != "로어북 컨텍스트 없음" and \
-               formatted_lorebook_context != "로어북 컨텍스트 없음 (제한으로 인해 선택된 항목 없음)":
-                logger.info(f"API 요청에 동적 로어북 컨텍스트 주입됨. 내용 일부: {formatted_lorebook_context[:100]}...")
-                # 주입된 로어북 키워드 로깅
-                injected_keywords = [entry.keyword for entry in relevant_entries_for_chunk if entry.keyword.lower() in chunk_text_lower]
-                if injected_keywords:
-                    logger.info(f"  🔑 주입된 로어북 키워드: {', '.join(injected_keywords)}")
-            else:
-                logger.debug(f"동적 로어북 주입 시도했으나, 관련 항목 없거나 제한으로 인해 실제 주입 내용 없음. 사용된 메시지: {formatted_lorebook_context}")
-            final_prompt = final_prompt.replace("{{lorebook_context}}", formatted_lorebook_context)
-        else:
-            if "{{lorebook_context}}" in final_prompt:
-                 final_prompt = final_prompt.replace("{{lorebook_context}}", "로어북 컨텍스트 없음 (주입 비활성화 또는 해당 항목 없음)")
-                 logger.debug("동적 로어북 주입 비활성화 또는 플레이스홀더 부재로 '컨텍스트 없음' 메시지 사용.")
+                final_prompt = final_prompt.replace("{{lorebook_context}}", "로어북 컨텍스트 없음 (BTG 주입 비활성화 또는 해당 항목 없음)")
+                logger.debug("BTG: 동적 로어북 주입 비활성화 또는 플레이스홀더 부재로 '컨텍스트 없음' 메시지 사용.")
         
         # 3. Main content slot - This should be done *after* all other placeholders are processed.
         final_prompt = final_prompt.replace("{{slot}}", chunk_text)
@@ -242,14 +236,18 @@ class TranslationService:
         if current_prompt_template is None:
             logger.warning("translate_text 호출 시 prompt_template이 제공되지 않았습니다. BTG 설정의 'universal_translation_prompt'를 사용합니다.")
             current_prompt_template = self.config.get(
-                "universal_translation_prompt", "Translate to {target_language}: {{slot}}"
+                "universal_translation_prompt", 
+                # BTG 자체 실행 시 사용할 매우 기본적인 폴백 프롬프트
+                "Translate to {target_language}. Lorebook: {{lorebook_context}}\n\nText: {{slot}}" 
             )
-            # {target_language} 플레이스홀더 처리 (여기서는 간단히 기본값으로 대체 또는 설정값 사용)
-            # 실제로는 AppService 레벨에서 target_language를 결정하여 프롬프트에 삽입 후 전달하는 것이 더 적절합니다.
-            # 여기서는 BTG 모듈 단독 실행 시의 fallback으로 가정합니다.
-            target_lang_for_prompt = self.config.get("target_language", "ko") # BTG config에 target_language가 있다면 사용
-            current_prompt_template = current_prompt_template.replace("{target_language}", target_lang_for_prompt)
+            # EBTG에서 호출 시에는 {target_language}가 이미 채워진 universal_translation_prompt가 전달될 것으로 예상.
+            # BTG 단독 실행 시에는 {target_language}가 남아있을 수 있으므로, BTG config의 target_language로 채움.
+            if "{target_language}" in current_prompt_template:
+                target_lang_for_prompt = self.config.get("target_language", "ko") 
+                current_prompt_template = current_prompt_template.replace("{target_language}", target_lang_for_prompt)
+                logger.debug(f"BTG translate_text: prompt_template에 {{target_language}}가 있어 '{target_lang_for_prompt}'로 대체.")
 
+        # _construct_prompt는 {{lorebook_context}}와 {{slot}}을 채웁니다.
         processed_text = text_chunk
         prompt = self._construct_prompt(processed_text, current_prompt_template)
 
@@ -326,8 +324,11 @@ class TranslationService:
         if not text_chunk.strip():
             logger.info("번역할 텍스트 청크가 비어있습니다. 빈 <p></p> 조각을 반환합니다.")
             return "<p></p>" # 또는 빈 문자열, 정책에 따라 결정
+        
+        # EBTG에서 전달된 prompt_template_with_context_and_slot은 이미 {target_language}와
+        # {ebtg_lorebook_context} (또는 {{lorebook_context}})가 채워져 있고, {{slot}}만 남아있는 상태입니다.
+        # 따라서 여기서는 _construct_prompt를 호출하지 않고, 직접 {{slot}}만 채웁니다.
 
-        # Configuration for content safety retry
         use_retry = self.config.get("use_content_safety_retry", True) # Assuming this config exists or add it
         max_attempts = self.config.get("max_content_safety_split_attempts", 3)
         min_size = self.config.get("min_content_safety_chunk_size", 100)
@@ -335,12 +336,13 @@ class TranslationService:
         if use_retry:
             return self._translate_to_xhtml_fragment_recursive(
                 text_chunk, target_language, prompt_template_with_context_and_slot,
-                0, max_attempts, min_size
+                current_attempt=0, max_split_attempts=max_attempts, min_chunk_size=min_size
             )
         
         # Original direct call if retry is disabled
+        # {{slot}} 플레이스홀더를 현재 청크 텍스트로 대체
         final_prompt_for_api = prompt_template_with_context_and_slot.replace("{{slot}}", text_chunk)
-
+        
         # Gemini API가 반환할 JSON 스키마 정의
         response_schema = {
             "type": "object",
@@ -410,6 +412,9 @@ class TranslationService:
         if not text_chunk.strip():
             return "" # Or "<p></p>" if empty fragments should be represented
 
+        # EBTG에서 전달된 prompt_template_with_context_and_slot은 이미 {target_language}와
+        # {ebtg_lorebook_context} (또는 {{lorebook_context}})가 채워져 있고, {{slot}}만 남아있는 상태입니다.
+        # 따라서 여기서는 _construct_prompt를 호출하지 않고, 직접 {{slot}}만 채웁니다.
         final_prompt_for_api = prompt_template_with_context_and_slot.replace("{{slot}}", text_chunk)
         response_schema = {
             "type": "object",

@@ -240,6 +240,7 @@ class EbtgGui:
         if self.ebtg_app_service:
             # Defer loading settings to UI until the event loop is idle
             self.root.after(0, self._initialize_ui_with_settings)
+            self.root.after(100, self._update_btg_dynamic_lorebook_ui_state) # 로드 후 UI 상태 업데이트
         else:
             # Disable start button if service failed to initialize
             if hasattr(self, 'start_button'): self.start_button.config(state=tk.DISABLED)
@@ -251,6 +252,7 @@ class EbtgGui:
             return
         self._load_ebtg_settings_to_ui()
         self._update_model_list_ui() # This might show message boxes if API fails
+        self._update_btg_dynamic_lorebook_ui_state() # 설정 로드 후 UI 상태 업데이트
 
         def set_initial_focus():
             if not self.root.winfo_exists(): # Check if root window still exists
@@ -641,6 +643,7 @@ class EbtgGui:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
                 self._display_btg_lorebook_content(content)
+                self._update_btg_dynamic_lorebook_ui_state() # 로어북 파일 변경 시 UI 상태 업데이트
                 logging.getLogger(__name__).info(f"BTG 로어북 파일 로드 및 표시됨: {filepath}")
             except Exception as e:
                 messagebox.showerror("오류", f"로어북 파일 로드 실패: {e}")
@@ -648,6 +651,7 @@ class EbtgGui:
                 # Clear display and path if loading fails
                 self._display_btg_lorebook_content("")
                 self.btg_lorebook_json_path_entry.delete(0, tk.END)
+                self._update_btg_dynamic_lorebook_ui_state() # 실패 시에도 업데이트
 
     def _browse_service_account_file(self):
         filepath = filedialog.askopenfilename(title="서비스 계정 JSON 파일 선택", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
@@ -808,6 +812,7 @@ class EbtgGui:
             # After saving, reload the config into the app_service instance
             self.ebtg_app_service.config = self.ebtg_app_service.config_manager.load_config()
             # And update BTG's config if it's managed separately or needs explicit update
+            self.ebtg_app_service._load_ebtg_lorebook_data() # EBTG 로어북 다시 로드
             self.ebtg_app_service.btg_app_service.config.update(self._get_btg_config_from_ui())
             self.ebtg_app_service.btg_app_service.load_app_config() # Re-init BTG client if auth changed
 
@@ -815,6 +820,8 @@ class EbtgGui:
             logging.getLogger(__name__).info("EBTG 설정 저장됨.")
         except Exception as e: # type: ignore
             messagebox.showerror("오류", f"EBTG 설정 저장 중 예상치 못한 오류: {e}") # 이미 한국어
+        finally:
+            self._update_btg_dynamic_lorebook_ui_state() # 저장 후 UI 상태 업데이트
             logging.getLogger(__name__).error(f"EBTG 설정 저장 중 오류: {e}", exc_info=True)
 
     def _load_ebtg_settings_to_ui(self):
@@ -891,6 +898,7 @@ class EbtgGui:
         self.btg_lorebook_priority_text.insert('1.0', json.dumps(config.get("lorebook_priority_settings", {"character": 5, "worldview": 5, "story_element": 5}), indent=2))
         
         self._toggle_vertex_fields() # Update UI state based on loaded config
+        self._update_btg_dynamic_lorebook_ui_state() # 설정 로드 후 UI 상태 업데이트
         logging.getLogger(__name__).info("EBTG 설정 UI에 로드 완료.")
 
     def _translation_task_runner(self, input_path, output_path):
@@ -904,6 +912,7 @@ class EbtgGui:
             # and subsequently to btg_app_service's config before translation.
             # This also handles lorebook_json_path for BTG's TranslationService.
             current_ui_config = self._get_ebtg_config_from_ui()
+            self.ebtg_app_service._load_ebtg_lorebook_data() # UI 변경사항 반영 위해 로어북 다시 로드
             self.ebtg_app_service.config.update(current_ui_config)
 
             # Update BTG AppService config within EbtgAppService
@@ -1140,6 +1149,7 @@ class EbtgGui:
                     with open(result_json_path, 'r', encoding='utf-8') as f_res:
                         lore_content_to_display = f_res.read() # Read content while file is open
                     self.root.after(0, lambda content=lore_content_to_display: self._display_btg_lorebook_content(content)) # Pass content to lambda
+                self.root.after(0, self._update_btg_dynamic_lorebook_ui_state) # 추출 후 UI 상태 업데이트
             except (BtgFileHandlerException, BtgApiClientException, BtgServiceException, BtgBusinessLogicException) as e_btg:
                 logging.getLogger(__name__).error(f"로어북 추출 중 BTG 예외: {e_btg}", exc_info=True)
                 self.root.after(0, lambda exc=e_btg: messagebox.showerror("추출 오류", f"로어북 추출 중 오류: {exc}")) # 이미 한국어
@@ -1148,6 +1158,7 @@ class EbtgGui:
                 self.root.after(0, lambda exc=e_unknown: messagebox.showerror("알 수 없는 오류", f"로어북 추출 중 예상치 못한 오류: {exc}")) # 이미 한국어
             finally:
                 logging.getLogger(__name__).info("로어북 추출 스레드 종료.") # 이미 한국어
+                self.root.after(0, self._update_btg_dynamic_lorebook_ui_state) # 스레드 종료 후 UI 상태 업데이트
 
         thread = threading.Thread(target=_extraction_task_wrapper, daemon=True)
         thread.start()
@@ -1189,6 +1200,36 @@ class EbtgGui:
         secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
+    def _update_btg_dynamic_lorebook_ui_state(self):
+        """
+        EBTG 자체 로어북 사용 여부에 따라 BTG의 동적 로어북 주입 관련 UI 요소들의 상태를 업데이트합니다.
+        """
+        if not self.ebtg_app_service:
+            return
+
+        # EBTG가 자체 로어북을 사용하는지 확인 (ebtg_lorebook_entries가 채워져 있는지)
+        ebtg_uses_own_lorebook = bool(self.ebtg_app_service.ebtg_lorebook_entries)
+
+        btg_dynamic_injection_widgets_state = tk.DISABLED if ebtg_uses_own_lorebook else tk.NORMAL
+        
+        # BTG의 동적 로어북 주입 관련 위젯들 상태 변경
+        if hasattr(self, 'btg_enable_dynamic_lorebook_check'):
+            self.btg_enable_dynamic_lorebook_check.config(state=btg_dynamic_injection_widgets_state)
+        if hasattr(self, 'btg_max_lorebook_entries_injection_entry'):
+            self.btg_max_lorebook_entries_injection_entry.config(state=btg_dynamic_injection_widgets_state)
+        if hasattr(self, 'btg_max_lorebook_chars_injection_entry'):
+            self.btg_max_lorebook_chars_injection_entry.config(state=btg_dynamic_injection_widgets_state)
+
+        # 상태 메시지 (예시 - 별도 레이블 추가 필요 또는 Tooltip 변경)
+        if ebtg_uses_own_lorebook:
+            # 예: Tooltip 변경 또는 상태바 메시지
+            if hasattr(self, 'btg_enable_dynamic_lorebook_check'):
+                 Tooltip(self.btg_enable_dynamic_lorebook_check, "EBTG 자체 로어북 사용 중. 이 설정은 무시됩니다.")
+            logging.getLogger(__name__).info("EBTG 자체 로어북 활성됨. BTG 동적 주입 UI 비활성화.")
+        else:
+            if hasattr(self, 'btg_enable_dynamic_lorebook_check'):
+                 Tooltip(self.btg_enable_dynamic_lorebook_check, "번역 시 로어북(용어집)의 내용을 동적으로 프롬프트에 주입할지 여부입니다.")
+            logging.getLogger(__name__).info("EBTG 자체 로어북 비활성. BTG 동적 주입 UI 활성화.")
 
 if __name__ == '__main__':
     # This allows direct execution of the GUI script for testing.

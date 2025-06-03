@@ -20,7 +20,7 @@ class EbtgConfigManager:
             "segment_character_limit": 4000, # Unified: Target char length for XHTML content items (EBTG), plain text chunks for fragment translation (EBTG), and general text chunking (BTG).
             "perform_epub_validation": True, # New option to control EPUB validation
             "perform_content_omission_check": True, # New option for content omission check
-            "ebtg_lorebook_json_path": None, # Path for EBTG's primary lorebook
+            "lorebook_json_path": None, # Unified path for lorebook, controlled by GUI, used by EBTG and BTG.
             "ebtg_max_lorebook_entries_injection": 5, # Max EBTG lorebook entries to inject into prompt
             "ebtg_max_lorebook_chars_injection": 1000,  # Max EBTG lorebook chars to inject into prompt
             # "text_fragment_prompt_template" is now merged into "universal_translation_prompt"

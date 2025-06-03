@@ -61,7 +61,10 @@ class EbtgAppService:
 
         # EBTG-managed lorebook
         self.ebtg_lorebook_entries: List[LorebookEntryDTO] = []
-        self.ebtg_lorebook_json_path = self.config.get("ebtg_lorebook_json_path")
+        # Use the unified 'lorebook_json_path' for EBTG's specific lorebook mechanism.
+        # The GUI controls 'lorebook_json_path'.
+        self.ebtg_lorebook_json_path = self.config.get("lorebook_json_path") 
+        logger.info(f"EBTG-specific lorebook mechanism will use path: {self.ebtg_lorebook_json_path} (from 'lorebook_json_path' config)")
         self.ebtg_max_lorebook_entries_injection = self.config.get("ebtg_max_lorebook_entries_injection", 5)
         self.ebtg_max_lorebook_chars_injection = self.config.get("ebtg_max_lorebook_chars_injection", 1000)
         self._load_ebtg_lorebook_data()
@@ -109,9 +112,9 @@ class EbtgAppService:
                                 logger.warning(f"EBTG Lorebook: Error converting item to DTO: {item_dict}, Error: {e_dto}")
                 logger.info(f"EBTG Lorebook: Loaded {len(self.ebtg_lorebook_entries)} entries from {self.ebtg_lorebook_json_path}")
             except Exception as e:
-                logger.error(f"EBTG Lorebook: Failed to load or parse from {self.ebtg_lorebook_json_path}: {e}", exc_info=True)
+                logger.error(f"EBTG Lorebook: Failed to load or parse EBTG-specific lorebook from {self.ebtg_lorebook_json_path}: {e}", exc_info=True)
         else:
-            logger.info(f"EBTG Lorebook: Path '{self.ebtg_lorebook_json_path}' not configured or file does not exist. No EBTG-specific lorebook loaded.")
+            logger.info(f"EBTG Lorebook: Path for EBTG-specific lorebook ('{self.ebtg_lorebook_json_path}') not configured or file does not exist. No EBTG-specific lorebook loaded.")
 
     def _format_ebtg_lorebook_for_prompt(self, lorebook_entries: List[LorebookEntryDTO]) -> str:
         """Formats selected EBTG lorebook entries for prompt injection."""
@@ -586,6 +589,48 @@ class EbtgAppService:
             # or load existing progress if implementing resume functionality (future).
             self.progress_service.clear_progress(Path(input_epub_path).name)
             self.epub_processor.open_epub(input_epub_path)
+
+            # --- BTG AppService 설정 준비 (로어북 주입 로직 포함) ---
+            logger.info("Preparing BTG AppService configuration for this translation run.")
+            effective_btg_config_for_run = {}
+            # EBTG 설정에서 BTG 모듈이 사용할 관련 설정들을 복사합니다.
+            # 이 키 목록은 btg_module/config_manager.py의 기본 설정을 참고하여 EBTG가 제어할 항목들로 구성합니다.
+            btg_keys_from_ebtg_config = [
+                "api_keys", "use_vertex_ai", "service_account_file_path", "gcp_project", "gcp_location",
+                "model_name", "temperature", "top_p", "segment_character_limit",
+                "max_workers", "requests_per_minute", "novel_language", "novel_language_fallback",
+                "use_content_safety_retry", "max_content_safety_split_attempts", "min_content_safety_chunk_size",
+                "lorebook_json_path", # 통합된 로어북 경로
+                "max_lorebook_entries_per_chunk_injection", # BTG 자체 주입 시 사용
+                "max_lorebook_chars_per_chunk_injection",   # BTG 자체 주입 시 사용
+                # 로어북 추출 관련 설정 (번역 시 직접 사용되진 않지만, BTG 설정 일관성을 위해 포함 가능)
+                "lorebook_sampling_ratio", "lorebook_max_entries_per_segment", "lorebook_extraction_temperature",
+                "lorebook_sampling_method", "lorebook_max_chars_per_entry", "lorebook_keyword_sensitivity",
+                "lorebook_chunk_size", "lorebook_priority_settings"
+            ]
+            for key in btg_keys_from_ebtg_config:
+                if key in self.config:
+                    effective_btg_config_for_run[key] = self.config[key]
+
+            # EBTG가 자체 로어북을 주입할지 결정
+            ebtg_will_inject_lorebook = bool(self.ebtg_lorebook_entries)
+
+            if ebtg_will_inject_lorebook:
+                logger.info("EBTG will inject its own lorebook context. Disabling BTG's dynamic lorebook injection.")
+                effective_btg_config_for_run["enable_dynamic_lorebook_injection"] = False
+            else:
+                # EBTG가 주입하지 않으면, GUI에서 설정된 BTG의 동적 로어북 주입 설정을 따름
+                btg_dynamic_injection_setting = self.config.get("enable_dynamic_lorebook_injection", False)
+                logger.info(f"EBTG is not injecting lorebook. BTG's dynamic lorebook injection set to: {btg_dynamic_injection_setting} (from EBTG config).")
+                effective_btg_config_for_run["enable_dynamic_lorebook_injection"] = btg_dynamic_injection_setting
+
+            if self.btg_app_service:
+                self.btg_app_service.config.clear()
+                self.btg_app_service.config.update(effective_btg_config_for_run)
+                self.btg_app_service.load_app_config() # BTG 서비스 재초기화 (새 설정 적용)
+                logger.info("BTG AppService re-configured for the current translation run based on EBTG's lorebook strategy.")
+            # --- BTG AppService 설정 준비 완료 ---
+
             xhtml_items: list[EpubXhtmlItem] = self.epub_processor.get_xhtml_items()
             
             total_files = len(xhtml_items)
