@@ -1063,7 +1063,7 @@ class EbtgGui:
                 
                 result_json_path = self.ebtg_app_service.btg_app_service.extract_lorebook(
                     novel_text_content=epub_full_text,
-                    input_file_path_for_naming=input_epub_path, # Use EPUB path for naming output
+                    input_path_for_naming=input_epub_path, # Use EPUB path for naming output
                     progress_callback=self._update_lorebook_extraction_progress,
                     novel_language_code=novel_lang_for_extraction,
                     seed_lorebook_path=self.btg_lorebook_json_path_entry.get() or None # Use seed if specified
