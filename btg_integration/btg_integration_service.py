@@ -146,6 +146,47 @@ class BtgIntegrationService:
             # Consider if this should also raise ApiXhtmlGenerationError or return None
             return None
 
+    def translate_single_text_chunk_to_xhtml_fragment(
+        self,
+        text_chunk: str,
+        target_language: str,
+        prompt_template_for_fragment_generation: str, # Should have {{slot}}
+        ebtg_lorebook_context: Optional[str]
+    ) -> str:
+        """
+        Translates a single text chunk into an XHTML fragment using the BTG module.
+        This is a helper method for EbtgAppService to use with ThreadPoolExecutor.
+        """
+        logger.debug(f"BtgIntegrationService: Translating single chunk. Lang: {target_language}, Chunk (start): {text_chunk[:50]}...")
+
+        if not self.btg_app_service.translation_service:
+            logger.error("BTG TranslationService is not initialized. Cannot translate single text chunk.")
+            raise EbtgProcessingError("BTG module's TranslationService not ready for single chunk translation.")
+
+        # Prepare the prompt by filling in language and lorebook context
+        # The {{slot}} will be filled by BTG's TranslationService.
+        prompt_with_context = prompt_template_for_fragment_generation.replace(
+            "{target_language}", target_language
+        ).replace(
+            "{ebtg_lorebook_context}", ebtg_lorebook_context or "제공된 로어북 컨텍스트 없음"
+        )
+
+        try:
+            fragment: str = self.btg_app_service.translation_service.translate_text_to_xhtml_fragment(
+                text_chunk=text_chunk,
+                target_language=target_language,
+                prompt_template_with_context_and_slot=prompt_with_context # This prompt still has {{slot}}
+            )
+            logger.debug(f"Successfully translated single chunk to fragment: '{fragment[:100]}...'")
+            return fragment
+        except (BtgApiClientException, BtgServiceException) as e:
+            logger.error(f"Error translating single text chunk to XHTML fragment: {e}", exc_info=True)
+            raise # Re-raise to be caught by the calling ThreadPoolExecutor future
+        except Exception as e_unexpected:
+            logger.error(f"Unexpected error translating single text chunk: {e_unexpected}", exc_info=True)
+            # Consider if this should also raise ApiXhtmlGenerationError or return None
+            return None
+
     def translate_text_chunks(
         self,
         request_dto: TranslateTextChunksRequestDto

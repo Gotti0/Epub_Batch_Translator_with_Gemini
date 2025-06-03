@@ -443,6 +443,30 @@ class EbtgAppService:
             logger.error(f"Unexpected error in segment processing {segment_id_prefix}: {e_unexpected_segment}", exc_info=True)
             return task.xhtml_item_id, task.segment_index, None, e_unexpected_segment
 
+    def _translate_single_chunk_task_wrapper(
+        self,
+        chunk_text: str,
+        chunk_idx: int, # For logging/error reporting
+        target_language: str,
+        prompt_template: str,
+        lorebook_context: Optional[str]
+    ) -> Tuple[int, str, Optional[Exception]]:
+        """
+        Wrapper to translate a single text chunk using BtgIntegrationService.
+        Returns (chunk_idx, translated_fragment_or_error_placeholder, error_or_None)
+        """
+        try:
+            translated_fragment = self.btg_integration.translate_single_text_chunk_to_xhtml_fragment(
+                text_chunk=chunk_text,
+                target_language=target_language,
+                prompt_template_for_fragment_generation=prompt_template,
+                ebtg_lorebook_context=lorebook_context
+            )
+            return chunk_idx, translated_fragment, None
+        except Exception as e:
+            logger.error(f"Error translating chunk {chunk_idx}: {e}", exc_info=True)
+            return chunk_idx, f"<p>[Chunk {chunk_idx} Translation Error: {e}]</p>", e
+
     def get_all_text_from_epub(self, epub_path: str) -> str:
         """
         Extracts all textual content from the XHTML files within an EPUB.
@@ -679,38 +703,64 @@ class EbtgAppService:
                     # Call BtgIntegrationService (This method needs to be implemented in BtgIntegrationService)
                     # It's expected to use BtgAppService to call the LLM for each chunk.
                     try:
-                        # Assuming BtgIntegrationService.translate_text_chunks returns TranslateTextChunksResponseDto
-                        # This method is responsible for iterating through chunks, calling BTG's translation service,
-                        # and collecting results.
-                        response_dto: TranslateTextChunksResponseDto = self.btg_integration.translate_text_chunks(translation_request_dto)
-                        
-                        if response_dto.errors or len(response_dto.translated_xhtml_fragments) != len(text_chunks_for_btg):
-                            logger.error(f"[{item_filename}] Errors encountered during text chunk translation by BTG, or mismatch in fragment count. Errors: {response_dto.errors}. Fragments received: {len(response_dto.translated_xhtml_fragments)}, expected: {len(text_chunks_for_btg)}. Using fallback.")
-                            # Fallback for the entire XHTML item if any chunk fails or counts mismatch
-                            raise EbtgProcessingError("BTG failed to translate one or more text chunks.")
+                        # --- Parallelized Text Chunk Translation ---
+                        max_workers_for_ebtg = self.config.get("max_workers", 4) # Use the same max_workers as for BTG
+                        translated_fragments_map: Dict[int, str] = {}
+                        chunk_translation_errors: List[str] = []
 
+                        with ThreadPoolExecutor(max_workers=max_workers_for_ebtg) as executor:
+                            future_to_chunk_idx: Dict[Any, int] = {}
+                            for idx, chunk_to_translate in enumerate(text_chunks_for_btg):
+                                future = executor.submit(
+                                    self._translate_single_chunk_task_wrapper,
+                                    chunk_text=chunk_to_translate,
+                                    chunk_idx=idx,
+                                    target_language=target_language,
+                                    prompt_template=prompt_template_for_fragments,
+                                    lorebook_context=ebtg_lorebook_context_for_item
+                                )
+                                future_to_chunk_idx[future] = idx
+
+                            for future in as_completed(future_to_chunk_idx):
+                                original_chunk_idx = future_to_chunk_idx[future]
+                                try:
+                                    _c_idx, translated_frag, error = future.result()
+                                    translated_fragments_map[original_chunk_idx] = translated_frag
+                                    if error:
+                                        chunk_translation_errors.append(f"Chunk {original_chunk_idx}: {error}")
+                                except Exception as exc:
+                                    logger.error(f"Error processing future for chunk {original_chunk_idx}: {exc}")
+                                    translated_fragments_map[original_chunk_idx] = f"<p>[Chunk {original_chunk_idx} Processing Error: {exc}]</p>"
+                                    chunk_translation_errors.append(f"Chunk {original_chunk_idx} (Future): {exc}")
+                        
+                        if chunk_translation_errors:
+                            logger.error(f"[{item_filename}] Errors encountered during parallel text chunk translation. Errors: {chunk_translation_errors}. Using fallback.")
+                            raise EbtgProcessingError(f"Failed to translate one or more text chunks for {item_filename}.")
+
+                        # Ensure fragments are in order
+                        ordered_translated_fragments = [translated_fragments_map[i] for i in range(len(text_chunks_for_btg))]
+                        # --- End Parallelized Text Chunk Translation ---
+                        
                         # --- Phase 5: Reassembly ---
                         logger.info(f"[{item_filename}] Starting Phase 5: EPUB Reassembly.")
                         reassembled_xhtml_parts: List[str] = []
-                        
-                        # Reconstruct the full translated text for each item in `texts_for_translation_for_item`.
-                        translated_texts_for_original_items: List[str] = []
-                        for original_item_idx in range(len(texts_for_translation_for_item)):
-                            btg_chunk_indices = source_text_item_to_btg_chunks_map[original_item_idx]
-                            concatenated_translation_for_original_item = "".join(
-                                response_dto.translated_xhtml_fragments[i] for i in btg_chunk_indices
-                            )
-                            translated_texts_for_original_items.append(concatenated_translation_for_original_item)
-
-                        # Create an iterator for the reconstructed translations
-                        translated_item_iter = iter(translated_texts_for_original_items)
+                        translated_chunk_iter = iter(ordered_translated_fragments) # Use the ordered list of fragments
 
                         for element in extracted_elements:
                             if isinstance(element, TextBlock):
                                 if element.text_content.strip(): # This TextBlock contributed.
                                     try:
                                         translated_block_content = next(translated_item_iter)
-                                        reassembled_xhtml_parts.append(translated_block_content)
+                                        # If a single TextBlock was split into multiple text_chunks_for_btg,
+                                        # we need to concatenate their translations.
+                                        # This requires knowing how many chunks correspond to this TextBlock.
+                                        # The current `source_text_item_to_btg_chunks_map` helps here.
+                                        # We need to map `element` back to its original index in `texts_for_translation_for_item`.
+                                        # This part of reassembly needs refinement if a single TextBlock can be split.
+                                        # For now, assuming one-to-one or that `translated_item_iter` handles it.
+                                        # The parallel execution now returns fragments per original chunk.
+                                        # We need to re-concatenate fragments if an original text item was sub-chunked.
+                                        reassembled_xhtml_parts.append(translated_block_content) # This needs to be fixed if sub-chunking happened
                                     except StopIteration:
                                         logger.error(f"[{item_filename}] Reassembly error: Ran out of translated body fragments for TextBlocks.")
                                         reassembled_xhtml_parts.append(f"<p>[Translation Error for TextBlock: {element.text_content[:30]}]</p>")
@@ -719,7 +769,7 @@ class EbtgAppService:
                                 translated_alt_text = element.original_alt # Default to original
                                 if element.original_alt and element.original_alt.strip(): # This ImageInfo's alt contributed.
                                     try:
-                                        translated_alt_fragment = next(translated_item_iter)
+                                        translated_alt_fragment = next(translated_chunk_iter) # Use the correct iterator
                                         soup_alt = BeautifulSoup(translated_alt_fragment, 'html.parser')
                                         translated_alt_text = soup_alt.get_text().strip()
                                         logger.debug(f"Using translated alt '{translated_alt_text}' for image src '{element.src}'")
@@ -727,13 +777,63 @@ class EbtgAppService:
                                         logger.error(f"[{item_filename}] Reassembly error: Ran out of translated alt text fragments.")
                                     except Exception as e_alt_parse:
                                         logger.warning(f"Failed to parse alt text fragment '{str(translated_alt_fragment)[:50]}...': {e_alt_parse}. Using original alt for {element.src}")
-                                # Reconstruct the img tag (Corrected indent for this block)
-                                # Reconstruct the img tag
                                 final_alt_text_for_tag = translated_alt_text if translated_alt_text else ""
                                 updated_img_tag = re.sub(r'alt=".*?"', f'alt="{final_alt_text_for_tag}"', element.original_tag_string, flags=re.IGNORECASE)
                                 if f'alt="{final_alt_text_for_tag}"' not in updated_img_tag: # Corrected indent for this if
                                     updated_img_tag = re.sub(r'(<img[^>]*?)(\s*\/?>)', rf'\1 alt="{final_alt_text_for_tag}"\2', element.original_tag_string) # Corrected indent for content
                                 reassembled_xhtml_parts.append(updated_img_tag)
+                        
+                        # Refined Reassembly Logic:
+                        # Iterate through original `texts_for_translation_for_item` and use `source_text_item_to_btg_chunks_map`
+                        # to combine the `ordered_translated_fragments`.
+                        reconstructed_original_item_translations: List[str] = []
+                        for original_item_idx in range(len(texts_for_translation_for_item)):
+                            btg_chunk_indices_for_this_original_item = source_text_item_to_btg_chunks_map.get(original_item_idx, [])
+                            if not btg_chunk_indices_for_this_original_item: # Should not happen if map is built correctly
+                                reconstructed_original_item_translations.append(f"<p>[Error: No mapped chunks for original item {original_item_idx}]</p>")
+                                continue
+                            
+                            # Concatenate the translated fragments corresponding to the sub-chunks of this original item.
+                            # The separator used when sub-chunking was "", so direct concatenation is appropriate.
+                            concatenated_translation = "".join(
+                                ordered_translated_fragments[i] for i in btg_chunk_indices_for_this_original_item
+                            )
+                            reconstructed_original_item_translations.append(concatenated_translation)
+                        
+                        # Now, use `reconstructed_original_item_translations` for reassembly with `extracted_elements`.
+                        reassembled_xhtml_parts = [] # Reset for correct reassembly
+                        translated_item_iter = iter(reconstructed_original_item_translations)
+
+                        for element in extracted_elements:
+                            if isinstance(element, TextBlock):
+                                if element.text_content.strip():
+                                    try:
+                                        reassembled_xhtml_parts.append(next(translated_item_iter))
+                                    except StopIteration:
+                                        logger.error(f"[{item_filename}] Reassembly (v2) error: Ran out of translated body fragments.")
+                                        reassembled_xhtml_parts.append(f"<p>[Translation Error for TextBlock]</p>")
+                                        files_with_errors += 1
+                            elif isinstance(element, ImageInfo):
+                                translated_alt_text = element.original_alt
+                                if element.original_alt and element.original_alt.strip():
+                                    try:
+                                        translated_alt_fragment = next(translated_item_iter)
+                                        soup_alt = BeautifulSoup(translated_alt_fragment, 'html.parser')
+                                        translated_alt_text = soup_alt.get_text().strip()
+                                    except StopIteration:
+                                        logger.error(f"[{item_filename}] Reassembly (v2) error: Ran out of translated alt text fragments.")
+                                    except Exception as e_alt_parse:
+                                        logger.warning(f"Failed to parse alt text fragment for reassembly (v2): {e_alt_parse}.")
+                                
+                                final_alt_text_for_tag = translated_alt_text if translated_alt_text else ""
+                                # Preserve original img tag structure, only update alt
+                                temp_img_soup = BeautifulSoup(element.original_tag_string, 'html.parser')
+                                img_tag_obj = temp_img_soup.find('img')
+                                if img_tag_obj: # type: ignore
+                                    img_tag_obj['alt'] = final_alt_text_for_tag # type: ignore
+                                    reassembled_xhtml_parts.append(str(img_tag_obj))
+                                else: # Fallback if original_tag_string was not a valid img tag
+                                    reassembled_xhtml_parts.append(f'<img src="{element.src}" alt="{final_alt_text_for_tag}"/>')
                         
                         final_xhtml_content_str = "\n".join(reassembled_xhtml_parts)
                         
