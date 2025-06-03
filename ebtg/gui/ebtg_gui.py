@@ -1017,8 +1017,10 @@ class EbtgGui:
         else:
             self.progress_bar['value'] = 0 # Handle division by zero if total_files is 0
 
-        base_status_msg = f"{progress_dto.status_message} "
-        if progress_dto.current_file_name: status_msg += f"({progress_dto.current_file_name}) "
+        # Initialize status_msg with the base status message
+        status_msg = f"{progress_dto.status_message} "
+        if progress_dto.current_file_name:
+            status_msg += f"({progress_dto.current_file_name}) "
         status_msg += f"{progress_dto.processed_files}/{progress_dto.total_files} 파일"
         
         time_info_str = ""
