@@ -570,9 +570,6 @@ class EbtgGui:
 
         lorebook_display_buttons_frame = ttk.Frame(lorebook_display_frame)
         lorebook_display_buttons_frame.pack(fill="x", pady=5)
-        self.btg_load_lorebook_button = ttk.Button(lorebook_display_buttons_frame, text="로어북 불러오기", command=self._load_btg_lorebook_to_display)
-        Tooltip(self.btg_load_lorebook_button, "컴퓨터에 저장된 로어북 JSON 파일을 불러와 아래 텍스트 영역에 표시합니다.")
-        self.btg_load_lorebook_button.pack(side="left", padx=5)
         self.btg_copy_lorebook_button = ttk.Button(lorebook_display_buttons_frame, text="JSON 복사", command=self._copy_btg_lorebook_json)
         Tooltip(self.btg_copy_lorebook_button, "아래 텍스트 영역에 표시된 로어북 JSON 내용을 클립보드에 복사합니다.")
         self.btg_copy_lorebook_button.pack(side="left", padx=5)
@@ -636,9 +633,19 @@ class EbtgGui:
     def _browse_btg_lorebook_json_file(self):
         filepath = filedialog.askopenfilename(title="로어북 JSON 파일 선택 (BTG 모듈)", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
         if filepath:
-            self.btg_lorebook_json_path_entry.delete(0, tk.END)
-            self.btg_lorebook_json_path_entry.insert(0, filepath)
-
+            try:
+                self.btg_lorebook_json_path_entry.delete(0, tk.END)
+                self.btg_lorebook_json_path_entry.insert(0, filepath)
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self._display_btg_lorebook_content(content)
+                logging.getLogger(__name__).info(f"BTG 로어북 파일 로드 및 표시됨: {filepath}")
+            except Exception as e:
+                messagebox.showerror("오류", f"로어북 파일 로드 실패: {e}")
+                logging.getLogger(__name__).error(f"BTG 로어북 파일 로드 실패 ({filepath}): {e}", exc_info=True)
+                # Clear display and path if loading fails
+                self._display_btg_lorebook_content("")
+                self.btg_lorebook_json_path_entry.delete(0, tk.END)
 
     def _browse_service_account_file(self):
         filepath = filedialog.askopenfilename(title="서비스 계정 JSON 파일 선택", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
@@ -1093,19 +1100,6 @@ class EbtgGui:
         self.btg_lorebook_display_text.delete('1.0', tk.END)
         self.btg_lorebook_display_text.insert('1.0', content)
         self.btg_lorebook_display_text.config(state=tk.DISABLED)
-
-    def _load_btg_lorebook_to_display(self):
-        filepath = filedialog.askopenfilename(title="로어북 JSON 파일 선택", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*"))) # 이미 한국어
-        if filepath:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                self._display_btg_lorebook_content(content)
-                self.btg_lorebook_json_path_entry.delete(0, tk.END)
-                self.btg_lorebook_json_path_entry.insert(0, filepath)
-                logging.getLogger(__name__).info(f"BTG 로어북 파일 로드됨: {filepath}")
-            except Exception as e: # type: ignore
-                messagebox.showerror("오류", f"로어북 파일 로드 실패: {e}") # 이미 한국어
 
     def _copy_btg_lorebook_json(self):
         content = self.btg_lorebook_display_text.get('1.0', tk.END).strip()
