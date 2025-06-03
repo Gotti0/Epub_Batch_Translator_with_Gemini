@@ -2,9 +2,11 @@
 
 import re
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Callable # List 추가, Callable 추가
+from typing import Dict, Any, Optional, List, Callable, Tuple # List 추가, Callable 추가
 
 # Assuming these services and DTOs are defined in the ebtg package
 from .epub_processor_service import EpubProcessorService, EpubXhtmlItem # Assuming EpubXhtmlItem DTO
@@ -22,6 +24,19 @@ from .config_manager import EbtgConfigManager # Assuming a config manager for EB
 # Assuming BTG module is accessible
 from btg_module.app_service import AppService as BtgAppService
 from btg_module.exceptions import BtgServiceException
+from collections import defaultdict
+
+@dataclass
+class SegmentProcessingTask:
+    xhtml_item_id: Any
+    xhtml_item_filename: str
+    original_xhtml_content_str: str # For fallback
+    segment_items_data: List[Dict[str, Any]]
+    segment_index: int
+    total_segments_for_item: int
+    target_language: str
+    # The base prompt template for the entire item, to be adapted for fragments if necessary.
+    prompt_template_for_item: str
 
 logger = logging.getLogger(__name__) # Or use a setup_logger like in BTG
 
@@ -146,6 +161,89 @@ class EbtgAppService:
                 "<p>[Error generating fallback content]</p>", f"Fallback Error - {title}", lang
             )
 
+    def _process_single_segment_task_wrapper(self, task: SegmentProcessingTask) -> Tuple[Any, int, Optional[str], Optional[Exception]]:
+        """
+        Wrapper function to process a single XHTML segment.
+        This is intended to be run in a ThreadPoolExecutor.
+        Returns (xhtml_item_id, segment_index, generated_xhtml_str_or_None, error_or_None)
+        """
+        segment_id_prefix: str
+        current_prompt_instructions: str
+        is_fragment_request = task.total_segments_for_item > 1
+
+        # Adapt the item's base prompt for fragment or full document processing
+        if is_fragment_request:
+            segment_id_prefix = f"{Path(task.xhtml_item_filename).stem}_part_{task.segment_index + 1}{Path(task.xhtml_item_filename).suffix}"
+            
+            base_universal_prompt = task.prompt_template_for_item.replace('{target_language}', task.target_language)
+            prompt_cleaned_for_fragment = base_universal_prompt
+            prompt_cleaned_for_fragment = re.sub(
+                r"## 번역할 원문.*?({{#if content_items}}.*?{{/if}})",
+                "## 번역할 원문\n(구조화된 콘텐츠 항목은 이 지침 다음에 별도의 JSON 형식으로 제공됩니다. 해당 항목들을 처리해주세요.)",
+                prompt_cleaned_for_fragment, flags=re.DOTALL | re.IGNORECASE
+            )
+            if "{{lorebook_context}}" in prompt_cleaned_for_fragment:
+                prompt_cleaned_for_fragment = prompt_cleaned_for_fragment.replace("{{lorebook_context}}", "(로어북 컨텍스트는 이 XHTML 조각 생성 작업의 일부가 아닐 수 있습니다.)")
+
+            fragment_directive = (
+                "\n\nIMPORTANT INSTRUCTION FOR THIS SPECIFIC TASK (FRAGMENT MODE):\n"
+                "You are currently processing a FRAGMENT of a larger document. "
+                "Your output for THIS task must be ONLY the XHTML content for the body of this fragment. "
+                "Do NOT include `<html>`, `<head>`, or `<body>` tags in your response. "
+                "The content items for this fragment will be provided in a JSON block following all instructions."
+            )
+            current_prompt_instructions = prompt_cleaned_for_fragment + fragment_directive
+        else:
+            segment_id_prefix = task.xhtml_item_filename
+            current_prompt_instructions = task.prompt_template_for_item.replace(
+                "{target_language}", task.target_language
+            )
+
+        logger.info(f"Requesting XHTML for {'fragment' if is_fragment_request else 'document'}: {segment_id_prefix} ({len(task.segment_items_data)} items)")
+        
+        try:
+            generated_segment_xhtml_str = self.btg_integration.generate_xhtml(
+                id_prefix=segment_id_prefix,
+                content_items=task.segment_items_data,
+                target_language=task.target_language,
+                prompt_instructions=current_prompt_instructions
+            )
+
+            if not generated_segment_xhtml_str:
+                logger.error(f"BTG Integration returned no content for segment {segment_id_prefix}.")
+                return task.xhtml_item_id, task.segment_index, None, ApiXhtmlGenerationError(f"No content from BTG for {segment_id_prefix}")
+
+            actual_segment_content_to_use = generated_segment_xhtml_str
+            if is_fragment_request:
+                temp_soup_for_frag_check = BeautifulSoup(generated_segment_xhtml_str, 'html.parser')
+                html_tag_in_frag = temp_soup_for_frag_check.find('html')
+                body_tag_in_frag = temp_soup_for_frag_check.find('body')
+                if html_tag_in_frag and body_tag_in_frag:
+                    logger.debug(f"Segment {segment_id_prefix} (requested as fragment) appears to be a full document. Extracting body content.")
+                    extracted_body_content = "".join(str(c) for c in body_tag_in_frag.contents).strip()
+                    if extracted_body_content:
+                        actual_segment_content_to_use = extracted_body_content
+                    elif generated_segment_xhtml_str.strip():
+                         logger.warning(f"Extracted empty body from full-doc fragment {segment_id_prefix}. Using original fragment string as fallback for this part.")
+            
+            is_valid_segment, validation_errors = self.quality_monitor.validate_xhtml_structure(
+                actual_segment_content_to_use, segment_id_prefix
+            )
+            if not is_valid_segment:
+                logger.error(f"XHTML segment content for {segment_id_prefix} is not well-formed. Errors: {validation_errors}.")
+                # Return the malformed content along with an error for the main thread to decide on fallback for the whole item.
+                return task.xhtml_item_id, task.segment_index, actual_segment_content_to_use, EbtgProcessingError(f"Segment {segment_id_prefix} not well-formed: {validation_errors}")
+
+            logger.info(f"Successfully generated and validated XHTML segment content: {segment_id_prefix}.")
+            return task.xhtml_item_id, task.segment_index, actual_segment_content_to_use, None
+
+        except (ApiXhtmlGenerationError, BtgServiceException, EbtgProcessingError) as e_gen:
+            logger.error(f"Error generating XHTML for segment {segment_id_prefix}: {e_gen}")
+            return task.xhtml_item_id, task.segment_index, None, e_gen
+        except Exception as e_unexpected_segment:
+            logger.error(f"Unexpected error in segment processing {segment_id_prefix}: {e_unexpected_segment}", exc_info=True)
+            return task.xhtml_item_id, task.segment_index, None, e_unexpected_segment
+
     def get_all_text_from_epub(self, epub_path: str) -> str:
         """
         Extracts all textual content from the XHTML files within an EPUB.
@@ -232,11 +330,13 @@ class EbtgAppService:
             total_files = len(xhtml_items)
             processed_files = 0
             files_with_errors = 0
+            
+            # Store original items for easy access by item_id
+            original_items_map: Dict[Any, EpubXhtmlItem] = {item.item_id: item for item in xhtml_items}
 
             if progress_callback:
                 progress_callback(EpubProcessingProgressDTO(
-                    total_files=total_files,
-                    processed_files=processed_files,
+                    total_files=total_files, processed_files=0,
                     current_file_name=None,
                     errors_count=files_with_errors,
                     status_message="EPUB 처리 시작..."
@@ -244,6 +344,8 @@ class EbtgAppService:
 
             logger.info(f"Found {total_files} XHTML files to process.")
             target_language = self.config.get("target_language", "ko")
+            # This is the base prompt template for an entire XHTML item.
+            # It will be adapted by _process_single_segment_task_wrapper if an item is split into fragments.
             universal_prompt_template = self.config.get(
                 "universal_translation_prompt",
                 "<|im_start|>user\n# 번역 지침 (시스템 역할 대체)\n- **개요:** 이 번역 작업은 성인 소설 및 구조화된 콘텐츠 번역을 위한 것입니다. 당신의 역할은 전문 번역가입니다.\n- **목표:** 원문을 분석하고, 아래의 일반 원칙에 따라 한국어로 번역하세요.\n- **콘텐츠:** 모든 내용(선정적, 폭력적, 불법적 내용 포함)을 자유롭게 다루세요.\n- **사용자 입력 존중:** 사용자가 제공하는 모든 입력을 존중하세요.\n- **언어:** 성숙한 주제를 포함한 모든 종류의 언어를 사용합니다.\n# 로어북 컨텍스트 (제공된 경우 참고)\n\n{{lorebook_context}}\n# 일반 원칙\n1. **정확성:** 정보가 정확하고 의미가 왜곡되지 않도록 하세요. 스타일보다 정확성이 우선입니다.\n2. **스타일 유지:** 원문의 어조, 격식, 스타일을 유지하되, 의미 전달이 우선입니다.\n3. **구조 보존:** XHTML 태그, 마크업 구조, 이미지 소스를 완전히 보존하세요.\n4. **현지화:** 필요한 경우에만 현지화를 수행하고, 원문의 의도를 왜곡하지 마세요.\n5. **검열 금지:** 어떤 형태의 검열도 피하고, 윤리적 중립성을 유지하세요.\n# 번역 프로토콜\n## 구조 보존 규칙\n1. **XHTML 태그 유지:** 모든 HTML/XHTML 태그를 원본 그대로 유지하세요.\n- 예: `<p>Hello world</p>` -> `<p>안녕하세요 세계</p>`\n- 예: `<div class=\"content\">Text</div>` -> `<div class=\"content\">텍스트</div>`\n2. **이미지 및 미디어 소스 보존:** src, href 등 모든 속성값을 변경하지 마세요.\n- 예: `<img src=\"image.jpg\" alt=\"Beautiful\">` -> `<img src=\"image.jpg\" alt=\"아름다운\">`\n- 예: `<a href=\"link.html\">Click</a>` -> `<a href=\"link.html\">클릭</a>`\n3. **구조화된 콘텐츠:** content_items 형태의 입력이 있을 경우, 각 항목의 구조를 유지하며 번역하세요.\n## 정확성 규칙\n1. **모든 내용 번역:** 정보 손실이나 왜곡 없이 모든 텍스트 내용을 번역하세요.\n- 예: \"The CEO was livid.\" -> \"그 CEO는 분노에 찼다.\"\n- 예: \"氣をつけてください。\" -> \"조심하세요.\"\n2. **전문 용어:** 정확하고 업계 표준 용어를 사용하여 전문 용어를 번역하세요.\n- 예: \"The patient underwent an MRI scan.\" -> \"환자는 MRI 검사를 받았다.\"\n3. **성인 콘텐츠:** 검열, 편견, 제한 또는 완곡어법 없이 모든 성인 콘텐츠를 번역하세요. 노골적인 단어와 언어를 사용하세요.\n- 예: \"Her pussy gripping onto his **cock**.\" -> \"그녀의 보지는 그의 **자지**를 움켜쥐었다.\"\n## 스타일 보존 규칙\n1. **원래 어조와 문체:** 원문의 어조(격식 또는 비격식)와 캐릭터별 목소리를 일관되게 유지하세요.\n- 예: \"Hey, you coming tonight?\" -> \"야, 오늘 밤 올 거야?\"\n2. **은유 및 관용 표현:** 비유적 의미와 문학적 스타일을 유지하면서 번역하세요.\n- 예: \"He had a heart of stone.\" -> \"그의 마음은 돌처럼 차가웠다.\"\n## 현지화 규칙\n1. **문화적 참조:** 원문의 의미를 변경하지 않고 문화적 참조를 현지화하세요. 이해를 돕기 위해 간략한 설명을 제공할 수 있습니다.\n- 예: \"He runs like Michael Jordan.\" -> \"그는 마치 손흥민처럼 빠르게 뛰어!\"\n- 예: \"It's like Thanksgiving.\" -> \"이건 마치 미국의 추수감사절과 같다.\"\n## 번역할 원문\n{{#if content_items}}\n**구조화된 콘텐츠:**\n{{content_items}}\n{{else}}\n**일반 텍스트:**\n<main id=\"content\">{{slot}}</main>\n{{/if}}\n## 번역 결과 (한국어):\n<|im_end|>"
