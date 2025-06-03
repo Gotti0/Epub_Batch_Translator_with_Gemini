@@ -37,8 +37,8 @@ class SimplifiedHtmlExtractor:
             # This is a palliative measure. Consider profiling for the true bottleneck.
             # If logs are very verbose (like DEBUG), reducing log level might be more effective.
             elements_processed_since_last_delay = 0
-            DELAY_EVERY_N_ELEMENTS = 5  # Add a delay every 200 elements processed
-            DELAY_SECONDS = 0.001  # 1 millisecond delay
+            DELAY_EVERY_N_ELEMENTS = 200  # Add a delay every 200 elements processed
+            DELAY_SECONDS = 0.1  # 1 millisecond delay
 
 
 
@@ -57,14 +57,13 @@ class SimplifiedHtmlExtractor:
                     if element.name == 'img':
                         if current_text_parts:
                             full_text_before = " ".join(current_text_parts)
-                            content_items.append(TextBlock(text_content=full_text_before))
-                            logger.debug(f"Extracted text block (before image): '{full_text_before[:50]}...'")
+                            content_items.append(TextBlock(text_content=full_text_before)) # 로그 제거
+                            # logger.debug(f"Extracted text block (before image): '{full_text_before[:50]}...'")
                             current_text_parts = []
                         
                         src = element.get('src', '')
                         alt = element.get('alt', '')
                         original_tag_string = str(element)
-
                         if src:
                             image_info = ImageInfo(
                                 original_tag_string=original_tag_string,
@@ -72,21 +71,21 @@ class SimplifiedHtmlExtractor:
                                 original_alt=alt
                             )
                             content_items.append(image_info)
-                            logger.debug(f"Extracted image: src='{src}', alt='{alt}'")
+                            # logger.debug(f"Extracted image: src='{src}', alt='{alt}'") # 로그 제거
                         else:
                             logger.warning("Found <img> tag with no src attribute. Skipping image item, but processed preceding text if any.")
                     # Block-level or significant separator tags that should finalize any pending text.
                     elif element.name in ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'hr', 'table', 'ul', 'ol', 'dl', 'blockquote', 'pre', 'figure', 'figcaption']:
                         if current_text_parts:
                             text_block_content = " ".join(current_text_parts)
-                            content_items.append(TextBlock(text_content=text_block_content))
-                            logger.debug(f"Extracted text block (due to separator tag '{element.name}'): '{text_block_content[:50]}...'")
+                            content_items.append(TextBlock(text_content=text_block_content)) # 로그 제거
+                            # logger.debug(f"Extracted text block (due to separator tag '{element.name}'): '{text_block_content[:50]}...'")
                             current_text_parts = []
 
             if current_text_parts:
                 final_text_block_content = " ".join(current_text_parts)
                 content_items.append(TextBlock(text_content=final_text_block_content))
-                logger.debug(f"Extracted final text block: '{final_text_block_content[:50]}...'")
+                # logger.debug(f"Extracted final text block: '{final_text_block_content[:50]}...'") # 루프 후 발생하는 로그이므로 유지하거나, 필요시 제거 가능. 여기서는 일관성을 위해 제거.
 
         except Exception as e:
             logger.error(f"Error during HTML parsing or extraction: {e}", exc_info=True)

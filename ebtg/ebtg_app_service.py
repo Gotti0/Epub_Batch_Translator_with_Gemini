@@ -623,8 +623,29 @@ class EbtgAppService:
                         continue
 
                     # Chunk the texts
+                    # Revised chunking logic:
+                    text_chunks_for_btg: List[str] = []
+                    # Map: index of original item in texts_for_translation_for_item -> list of chunk indices in text_chunks_for_btg
+                    source_text_item_to_btg_chunks_map: Dict[int, List[int]] = defaultdict(list)
+                    
                     text_chunk_target_chars = self.config.get("text_chunk_target_chars", 3000)
-                    text_chunks_for_btg = self._create_text_chunks(texts_for_translation_for_item, text_chunk_target_chars)
+                    
+                    current_btg_chunk_idx = 0
+                    for original_idx, original_text_content in enumerate(texts_for_translation_for_item):
+                        if text_chunk_target_chars > 0 and len(original_text_content) > text_chunk_target_chars:
+                            # This original_text_content (from one TextBlock or one alt) is too long.
+                            # Sub-chunk it. The sub-chunks should be translated individually and then concatenated.
+                            # join_separator="" is important here as we are splitting one semantic unit.
+                            sub_chunks_of_original_item = self._create_text_chunks([original_text_content], text_chunk_target_chars, join_separator="")
+                            for sub_chunk in sub_chunks_of_original_item:
+                                text_chunks_for_btg.append(sub_chunk)
+                                source_text_item_to_btg_chunks_map[original_idx].append(current_btg_chunk_idx)
+                                current_btg_chunk_idx += 1
+                        else:
+                            # This original_text_content is short enough or no char limit.
+                            text_chunks_for_btg.append(original_text_content)
+                            source_text_item_to_btg_chunks_map[original_idx].append(current_btg_chunk_idx)
+                            current_btg_chunk_idx += 1
                     logger.info(f"[{item_filename}] Created {len(text_chunks_for_btg)} text chunks for BTG from {len(texts_for_translation_for_item)} original text items.")
 
                     if not text_chunks_for_btg: # Should not happen if texts_for_translation_for_item was not empty
@@ -665,43 +686,141 @@ class EbtgAppService:
                         # --- Phase 5: Reassembly ---
                         logger.info(f"[{item_filename}] Starting Phase 5: EPUB Reassembly.")
                         reassembled_xhtml_parts: List[str] = []
-                        translated_fragment_iter = iter(response_dto.translated_xhtml_fragments)
                         
-                        # Separate translated alt texts from the main body text fragments
-                        # The order in response_dto.translated_xhtml_fragments matches the order in texts_for_translation_for_item
-                        # texts_for_translation_for_item contains body texts first, then alt texts.
-                        
-                        num_body_texts = sum(1 for el in extracted_elements if isinstance(el, TextBlock) and el.text_content.strip())
-                        num_alt_texts = len(alt_text_details_map)
+                        # Reconstruct the full translated text for each item in `texts_for_translation_for_item`.
+                        translated_texts_for_original_items: List[str] = []
+                        for original_item_idx in range(len(texts_for_translation_for_item)):
+                            btg_chunk_indices = source_text_item_to_btg_chunks_map[original_item_idx]
+                            concatenated_translation_for_original_item = "".join(
+                                response_dto.translated_xhtml_fragments[i] for i in btg_chunk_indices
+                            )
+                            translated_texts_for_original_items.append(concatenated_translation_for_original_item)
 
-                        translated_body_fragments = [next(translated_fragment_iter) for _ in range(num_body_texts)]
-                        translated_alt_text_fragments = [next(translated_fragment_iter) for _ in range(num_alt_texts)]
+                        # Create an iterator for the reconstructed translations
+                        translated_item_iter = iter(translated_texts_for_original_items)
 
-                        # Store translated alt texts back into ImageInfo objects
-                        # We need to parse the alt text from the fragment (e.g., <p>Translated Alt</p> -> Translated Alt)
-                        current_alt_text_idx = 0
-                        for unique_alt_id, (image_info_obj, _) in alt_text_details_map.items():
-                            if current_alt_text_idx < len(translated_alt_text_fragments):
-                                alt_fragment = translated_alt_text_fragments[current_alt_text_idx]
-                                try:
-                                    soup_alt = BeautifulSoup(alt_fragment, 'html.parser')
-                                    image_info_obj.translated_alt = soup_alt.get_text().strip()
-                                    logger.debug(f"Stored translated alt '{image_info_obj.translated_alt}' for image src '{image_info_obj.src}'")
-                                except Exception as e_alt_parse:
-                                    logger.warning(f"Failed to parse alt text fragment '{alt_fragment[:50]}...': {e_alt_parse}. Using original alt for {image_info_obj.src}")
-                                    image_info_obj.translated_alt = image_info_obj.original_alt # Fallback to original
-                            else:
-                                logger.warning(f"Mismatch in alt text count for {unique_alt_id}. Using original alt for {image_info_obj.src}")
-                                image_info_obj.translated_alt = image_info_obj.original_alt # Fallback
-                            current_alt_text_idx += 1
-
-                        current_body_fragment_idx = 0
                         for element in extracted_elements:
                             if isinstance(element, TextBlock):
-                                if element.text_content.strip(): # Only add fragment if original text was not empty
-                                    if current_body_fragment_idx < len(translated_body_fragments):
-                                        reassembled_xhtml_parts.append(translated_body_fragments[current_body_fragment_idx])
-                                        current_body_fragment_idx += 1
+                                if element.text_content.strip(): # This TextBlock contributed.
+                                    try:
+                                        translated_block_content = next(translated_item_iter)
+                                        reassembled_xhtml_parts.append(translated_block_content)
+                                    except StopIteration:
+                                        logger.error(f"[{item_filename}] Reassembly error: Ran out of translated body fragments for TextBlocks.")
+                                        reassembled_xhtml_parts.append(f"<p>[Translation Error for TextBlock: {element.text_content[:30]}]</p>")
+                                        files_with_errors += 1
+                            elif isinstance(element, ImageInfo):
+                                translated_alt_text = element.original_alt # Default to original
+                                if element.original_alt and element.original_alt.strip(): # This ImageInfo's alt contributed.
+                                    try:
+                                        translated_alt_fragment = next(translated_item_iter)
+                                        soup_alt = BeautifulSoup(translated_alt_fragment, 'html.parser')
+                                        translated_alt_text = soup_alt.get_text().strip()
+                                        logger.debug(f"Using translated alt '{translated_alt_text}' for image src '{element.src}'")
+                                    except StopIteration:
+                                        logger.error(f"[{item_filename}] Reassembly error: Ran out of translated alt text fragments.")
+                                    except Exception as e_alt_parse:
+                                        logger.warning(f"Failed to parse alt text fragment '{str(translated_alt_fragment)[:50]}...': {e_alt_parse}. Using original alt for {element.src}")
+                                
+                                # Reconstruct the img tag
+                                final_alt_text_for_tag = translated_alt_text if translated_alt_text else ""
+                                updated_img_tag = re.sub(r'alt=".*?"', f'alt="{final_alt_text_for_tag}"', element.original_tag_string, flags=re.IGNORECASE)
+                                if f'alt="{final_alt_text_for_tag}"' not in updated_img_tag: # If alt wasn't present or regex failed
+                                    updated_img_tag = re.sub(r'(<img[^>]*?)(\s*\/?>)', rf'\1 alt="{final_alt_text_for_tag}"\2', element.original_tag_string)
+                                reassembled_xhtml_parts.append(updated_img_tag)
+
+                        final_xhtml_content_str = "\n".join(reassembled_xhtml_parts)
+                        
+                        # Validate and update EPUB content
+                        is_valid_xhtml, validation_errors = self.quality_monitor.validate_xhtml_structure(final_xhtml_content_str, item_filename)
+                        if not is_valid_xhtml:
+                            logger.error(f"[{item_filename}] Reassembled XHTML is not well-formed: {validation_errors}. Using fallback.")
+                            raise EbtgProcessingError(f"Reassembled XHTML for {item_filename} failed validation.")
+
+                        self.epub_processor.update_xhtml_content(item_id, final_xhtml_content_str.encode('utf-8'))
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "translated_reassembled_successfully")
+                        generated_xhtml_for_item_successfully = True
+                        logger.info(f"[{item_filename}] Successfully reassembled and updated in EPUB.")
+                        # --- End: Phase 5 ---
+
+                    except (BtgServiceException, EbtgProcessingError) as e_btg_reassembly:
+                        logger.error(f"[{item_filename}] Error during BTG call or reassembly: {e_btg_reassembly}. Using fallback.")
+                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
+                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, f"failed_reassembly_fallback", str(e_btg_reassembly))
+                        files_with_errors += 1
+
+                except (XhtmlExtractionError, ApiXhtmlGenerationError, BtgServiceException, UnicodeDecodeError) as e_proc:
+                    logger.error(f"Processing error for {item_filename}: {e_proc}. Using fallback content.")
+                    fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
+                    self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, f"failed_{type(e_proc).__name__}_fallback", str(e_proc))
+                    files_with_errors += 1
+                except Exception as e_unexpected:
+                    logger.error(f"Unexpected error processing {item_filename}: {e_unexpected}. Using fallback content.", exc_info=True)
+                    fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
+                    self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
+                    self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_unexpected_fallback", str(e_unexpected))
+                    files_with_errors += 1
+            
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(
+                    total_files=total_files,
+                    processed_files=processed_files,
+                    current_file_name=None,
+                    errors_count=files_with_errors,
+                    status_message="EPUB 처리 완료, 저장 중..."
+                ))
+
+            logger.info("All XHTML files processed. Saving new EPUB...")
+            self.epub_processor.save_epub(output_epub_path)
+            self.progress_service.save_progress(output_epub_path) # Save all accumulated progress
+            logger.info(f"Translated EPUB saved to: {output_epub_path}")
+
+            # --- IV. EpubValidationService Integration ---
+            if self.config.get("perform_epub_validation", True):
+                logger.info(f"Performing EPUB validation for {output_epub_path}...")
+                is_valid_epub, epub_errors, epub_warnings = self.epub_validator.validate_epub(output_epub_path)
+                if is_valid_epub:
+                    logger.info(f"EPUB validation successful for {output_epub_path}.")
+                    if epub_warnings:
+                        logger.warning(f"EPUB validation for {output_epub_path} has {len(epub_warnings)} warning(s):")
+                        for warn_idx, warn_msg in enumerate(epub_warnings[:5]): # Log first 5 warnings
+                            logger.warning(f"  Warn {warn_idx+1}: {warn_msg}")
+                else:
+                    logger.error(f"EPUB validation failed for {output_epub_path} with {len(epub_errors)} error(s):")
+                    for err_idx, err_msg in enumerate(epub_errors[:5]): # Log first 5 errors
+                        logger.error(f"  Error {err_idx+1}: {err_msg}")
+            # --- End EpubValidationService Integration ---
+
+            if files_with_errors > 0:
+                logger.warning(f"{files_with_errors}/{total_files} files encountered errors and fallback content was used.")
+
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(
+                    total_files=total_files,
+                    processed_files=processed_files,
+                    current_file_name=None,
+                    errors_count=files_with_errors,
+                    status_message="EPUB 번역 완료!"
+                ))
+
+        except FileNotFoundError as e:
+            logger.error(f"Input EPUB file not found: {input_epub_path} - {e}")
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(total_files=0, processed_files=0, errors_count=1, status_message=f"오류: 입력 파일을 찾을 수 없습니다 - {Path(input_epub_path).name}"))
+            raise EbtgProcessingError(f"Input EPUB not found: {input_epub_path}") from e
+        except Exception as e:
+            logger.error(f"An error occurred during EPUB translation: {e}", exc_info=True)
+            self.progress_service.save_progress(output_epub_path) # Attempt to save progress even if main process fails
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(
+                    total_files=total_files if 'total_files' in locals() else 0, 
+                    processed_files=processed_files if 'processed_files' in locals() else 0, 
+                    errors_count=files_with_errors + 1 if 'files_with_errors' in locals() else 1, 
+                    status_message=f"EPUB 번역 중 심각한 오류: {e}"
+                ))
+            raise EbtgProcessingError(f"EPUB translation failed: {e}") from e
                                     else:
                                         logger.warning(f"[{item_filename}] Mismatch: More TextBlocks than translated body fragments. Appending empty string for a TextBlock.")
                                         # reassembled_xhtml_parts.append("<p>[Missing Translation]</p>") # Or skip
