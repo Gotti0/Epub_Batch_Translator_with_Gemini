@@ -244,11 +244,35 @@ class EbtgGui:
         if not self.ebtg_app_service: # Should not happen if called from the conditional block
             return
         self._load_ebtg_settings_to_ui()
-        self._update_model_list_ui() # Initial model list load
-        # Explicitly set focus to the first interactive widget
-        if hasattr(self, 'input_epub_entry') and self.input_epub_entry.winfo_exists():
-            self.input_epub_entry.focus_set()
-            logging.getLogger(__name__).info("Explicitly set focus to input_epub_entry after UI initialization.")
+        self._update_model_list_ui() # This might show message boxes if API fails
+
+        def set_initial_focus():
+            if not self.root.winfo_exists(): # Check if root window still exists
+                return
+            try:
+                if hasattr(self, 'input_epub_entry') and self.input_epub_entry.winfo_exists():
+                    logging.getLogger(__name__).info("Attempting to set initial focus...")
+                    # Forcing focus to the root window first might help the OS recognize it as active
+                    self.root.focus_force() # Request window manager focus for the root window
+                    
+                    # Then set focus to the specific widget
+                    self.input_epub_entry.focus_set()
+                    
+                    # Optional: Verify focus (uncomment for debugging)
+                    # focused_widget = self.root.focus_get()
+                    # if focused_widget == self.input_epub_entry:
+                    #    logging.getLogger(__name__).info("Focus successfully set on input_epub_entry.")
+                    # else:
+                    #    logging.getLogger(__name__).warning(f"Focus is on {focused_widget}, not input_epub_entry.")
+                else:
+                    logging.getLogger(__name__).warning("input_epub_entry not available for focus setting.")
+            except tk.TclError as e: # This can happen if the window is destroyed while after_idle is pending
+                logging.getLogger(__name__).warning(f"TclError during initial focus setting (window might be closing): {e}")
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Unexpected error during initial focus setting: {e}", exc_info=True)
+
+        # Schedule set_initial_focus to run when Tkinter is idle
+        self.root.after_idle(set_initial_focus)
 
     def _create_epub_translation_widgets(self, parent_frame):
         # --- File Selection Frame ---
