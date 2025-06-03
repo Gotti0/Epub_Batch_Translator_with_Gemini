@@ -456,6 +456,12 @@ class EbtgAppService:
         Returns (chunk_idx, translated_fragment_or_error_placeholder, error_or_None)
         """
         try:
+            # 최종 프롬프트 문자열 생성 및 길이 계산
+            # prompt_template은 이미 target_language와 lorebook_context가 채워져 있고 {{slot}}만 남은 상태입니다.
+            final_prompt_for_api = prompt_template.replace("{{slot}}", chunk_text)
+            prompt_char_count = len(final_prompt_for_api)
+            logger.debug(f"API 호출 프롬프트 문자 수 (청크 {chunk_idx}): {prompt_char_count}자. 내용 (앞 100자): {final_prompt_for_api[:100]}...")
+
             translated_fragment = self.btg_integration.translate_single_text_chunk_to_xhtml_fragment(
                 text_chunk=chunk_text,
                 target_language=target_language,
