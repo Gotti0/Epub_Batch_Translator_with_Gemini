@@ -382,21 +382,12 @@ class EbtgGui:
         # 번역 프롬프트 (EBTG - XHTML 생성용, BTG - 일반 텍스트 번역용)
         prompt_frame = ttk.LabelFrame(settings_frame, text="번역 프롬프트", padding="10")
         prompt_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        ttk.Label(prompt_frame, text="EBTG XHTML 생성 프롬프트:").pack(anchor=tk.W)
-        self.ebtg_xhtml_prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=6, width=70)
-        Tooltip(self.ebtg_xhtml_prompt_text, "EBTG가 전체 XHTML 문서를 생성하도록 API에 지시할 때 사용되는 기본 프롬프트입니다.")
-        self.ebtg_xhtml_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
-        
-        ttk.Label(prompt_frame, text="EBTG XHTML 조각 생성 프롬프트:").pack(anchor=tk.W)
-        self.ebtg_xhtml_fragment_prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=6, width=70)
-        Tooltip(self.ebtg_xhtml_fragment_prompt_text, "EBTG가 XHTML 문서의 일부 조각(fragment)을 생성하도록 API에 지시할 때 사용되는 프롬프트입니다.\n'{overall_task_description}' 부분은 전체 문서 생성 프롬프트로 대체됩니다.")
-        self.ebtg_xhtml_fragment_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
 
-        ttk.Label(prompt_frame, text="BTG 일반 텍스트 프롬프트:").pack(anchor=tk.W)
-        self.btg_text_prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=6, width=70)
-        Tooltip(self.btg_text_prompt_text, "BTG 모듈이 일반 텍스트를 번역할 때 사용하는 프롬프트입니다.\n(로어북 추출 등 내부적으로 사용)")
-        self.btg_text_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
+        ttk.Label(prompt_frame, text="범용 번역 프롬프트 (EBTG & BTG):").pack(anchor=tk.W)
+        self.universal_translation_prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=10, width=70)
+        Tooltip(self.universal_translation_prompt_text, "XHTML 및 일반 텍스트 번역 모두에 사용될 범용 프롬프트입니다.\n{target_language}, {{content_items}}, {{lorebook_context}}, {{slot}} 등의 플레이스홀더를 사용할 수 있습니다.")
+        self.universal_translation_prompt_text.pack(fill="both", expand=True, padx=5, pady=2)
+
 
         # 콘텐츠 안전 재시도 설정 (BTG Module)
         content_safety_frame = ttk.LabelFrame(settings_frame, text="콘텐츠 안전 재시도 (BTG Module)", padding="10")
@@ -691,8 +682,7 @@ class EbtgGui:
         
         # EBTG specific settings
         config_data["target_language"] = self.ebtg_app_service.config.get("target_language", "ko") # Keep existing or default
-        config_data["prompt_instructions_for_xhtml_generation"] = self.ebtg_xhtml_prompt_text.get("1.0", tk.END).strip()
-        config_data["prompt_instructions_for_xhtml_fragment_generation"] = self.ebtg_xhtml_fragment_prompt_text.get("1.0", tk.END).strip()
+        config_data["universal_translation_prompt"] = self.universal_translation_prompt_text.get("1.0", tk.END).strip()
         try: # 새 파라미터 읽기
             config_data["xhtml_segment_target_chars"] = int(self.ebtg_xhtml_segment_target_chars_entry.get() or "4000")
         except ValueError:
@@ -700,7 +690,9 @@ class EbtgGui:
             messagebox.showwarning("입력 오류", "EBTG XHTML 세그먼트 목표 문자 수는 숫자여야 합니다. 기본값(4000)으로 설정됩니다.")
         
         # BTG module related settings (to be stored in ebtg_config.json, under a sub-key or flattened)
-        # For simplicity, we'll flatten them for now, but a sub-key like "btg_settings" might be cleaner.
+        # The universal_translation_prompt from EBTG will also be used by BTG if EBTG calls BTG.
+        # So, _get_btg_config_from_ui should also reflect this.
+        # For now, BTG settings are flattened. The universal prompt is at EBTG's top level.
         btg_settings = self._get_btg_config_from_ui()
         config_data.update(btg_settings) # Flatten BTG settings into EBTG config
 
@@ -732,7 +724,8 @@ class EbtgGui:
 
         btg_config["novel_language"] = self.btg_novel_language_entry.get().strip() or "auto"
         btg_config["novel_language_fallback"] = self.btg_novel_language_fallback_entry.get().strip() or "ja"
-        btg_config["prompts"] = self.btg_text_prompt_text.get("1.0", tk.END).strip() # BTG's general prompt
+        # "prompts" for BTG is now superseded by "universal_translation_prompt" from EBTG config
+        # btg_config["prompts"] = self.btg_text_prompt_text.get("1.0", tk.END).strip() # This UI element will be removed
 
         btg_config["use_content_safety_retry"] = self.btg_use_content_safety_retry_var.get()
         try: btg_config["max_content_safety_split_attempts"] = int(self.btg_max_split_attempts_entry.get() or "3")
@@ -793,10 +786,8 @@ class EbtgGui:
         config = self.ebtg_app_service.config
         
         # EBTG specific settings
-        self.ebtg_xhtml_prompt_text.delete('1.0', tk.END)
-        self.ebtg_xhtml_prompt_text.insert('1.0', config.get("prompt_instructions_for_xhtml_generation", ""))
-        self.ebtg_xhtml_fragment_prompt_text.delete('1.0', tk.END)
-        self.ebtg_xhtml_fragment_prompt_text.insert('1.0', config.get("prompt_instructions_for_xhtml_fragment_generation", ""))
+        self.universal_translation_prompt_text.delete('1.0', tk.END)
+        self.universal_translation_prompt_text.insert('1.0', config.get("universal_translation_prompt", ""))
         self.ebtg_xhtml_segment_target_chars_entry.delete(0, tk.END) # 새 파라미터 UI 업데이트
         self.ebtg_xhtml_segment_target_chars_entry.insert(0, str(config.get("xhtml_segment_target_chars", 4000)))
 
@@ -830,13 +821,6 @@ class EbtgGui:
         self.btg_novel_language_entry.insert(0, config.get("novel_language", "auto"))
         self.btg_novel_language_fallback_entry.delete(0, tk.END)
         self.btg_novel_language_fallback_entry.insert(0, config.get("novel_language_fallback", "ja"))
-        
-        self.btg_text_prompt_text.delete('1.0', tk.END)
-        btg_prompt_val = config.get("prompts", "") # This is BTG's general prompt
-        if isinstance(btg_prompt_val, (list, tuple)) and btg_prompt_val:
-            self.btg_text_prompt_text.insert('1.0', str(btg_prompt_val[0]))
-        elif isinstance(btg_prompt_val, str):
-            self.btg_text_prompt_text.insert('1.0', btg_prompt_val)
 
         self.btg_use_content_safety_retry_var.set(config.get("use_content_safety_retry", True))
         self.btg_max_split_attempts_entry.delete(0, tk.END)

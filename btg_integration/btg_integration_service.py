@@ -31,8 +31,8 @@ class BtgIntegrationService:
         }
         
         # --- Prompt Enhancements (Phase 2) ---
-        base_prompt_instructions = prompt_instructions # From ebtg_config
-
+        # prompt_instructions is the base instruction from EBTG (derived from universal_translation_prompt)
+        ebtg_provided_base_instructions = prompt_instructions
         # 1. <img> 위치 보존 강화 프롬프트
         img_pos_instruction = (
             "Image Placement: Images (represented by {'type': 'image', ...} items in the "
@@ -92,8 +92,9 @@ class BtgIntegrationService:
         # --- End Phase 3 ---
 
         enhanced_prompt_instructions = (
-            f"{base_prompt_instructions}\n\n"
-            f"{img_pos_instruction}\n\n"
+            f"{ebtg_provided_base_instructions}\n\n" # EBTG에서 온 프롬프트를 가장 먼저 배치
+            f"Regardless of the above, strictly adhere to the following technical instructions for XHTML generation:\n" # 명확한 구분
+            f"{img_pos_instruction}\n\n" # 기술적 지시사항 시작
             f"{block_structure_instruction}\n\n"
             f"{novel_style_instruction}\n\n" # This is the general novel style from Phase 2
             f"{novel_specific_prompt_details}\n\n" # More detailed novel-specifics from Phase 3

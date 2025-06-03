@@ -167,19 +167,12 @@ class EbtgAppService:
             files_with_errors = 0
 
             logger.info(f"Found {total_files} XHTML files to process.")
-
             target_language = self.config.get("target_language", "ko")
-            # Get base prompts from EBTG config (user can customize these in ebtg_config.json)
-            base_prompt_for_full_doc = self.config.get(
-                "prompt_instructions_for_xhtml_generation",
-                # Default prompt if not in config (though EbtgConfigManager should provide one)
-                "Translate the following text blocks and integrate the image information to create a complete and valid XHTML document. Preserve image sources and translate alt text. Wrap paragraphs in <p> tags."
+            universal_prompt_template = self.config.get(
+                "universal_translation_prompt",
+                "You are a professional translator. Translate the given text into {target_language}. If the input is structured (like content items for XHTML), maintain the structure, translate textual data, and preserve image sources. For plain text, provide a direct translation. Refer to the LOREBOOK_CONTEXT if provided. Text to translate or content items: {{content_items}} LOREBOOK_CONTEXT: {{lorebook_context}}"
             )
-            base_prompt_for_fragment = self.config.get(
-                "prompt_instructions_for_xhtml_fragment_generation",
-                # Default prompt
-                "You are generating a fragment of a larger XHTML document. Based on the overall task: '{overall_task_description}'. Now, translate the following text blocks and integrate the image information to create XHTML body content. Preserve image sources and translate alt text if present. Wrap paragraphs in <p> tags. Do NOT include html, head, or body tags. Ensure correct relative order of items. The items are:"
-            )
+
             xhtml_segment_target_chars = self.config.get("xhtml_segment_target_chars", 4000) # New parameter
 
 
@@ -221,15 +214,33 @@ class EbtgAppService:
                         current_prompt_instructions: str
                         is_fragment = len(item_segments) > 1
 
+                        # Construct the prompt for BtgIntegrationService based on the universal prompt.
+                        # BtgIntegrationService will further enhance this with its own specific instructions.
+                        prompt_for_btg_integration: str
+
                         if is_fragment:
                             segment_id_prefix = f"{Path(item_filename).stem}_part_{i+1}{Path(item_filename).suffix}"
-                            current_prompt_instructions = base_prompt_for_fragment.replace(
-                                "{overall_task_description}", base_prompt_for_full_doc
+                            # Construct the "overall task description" for fragment generation
+                            overall_task_desc_for_fragment = universal_prompt_template.replace(
+                                "{target_language}", target_language
+                            ).replace(
+                                "{{content_items}}", "the provided content items to form a complete XHTML document"
+                            ).replace( # Remove lorebook context for overall description to keep it concise
+                                "LOREBOOK_CONTEXT: {{lorebook_context}}", ""
+                            ).strip()
+
+                            prompt_for_btg_integration = (
+                                f"You are generating an XHTML fragment. The overall task is: '{overall_task_desc_for_fragment}'. "
+                                f"Now, using the universal translation instruction: '{universal_prompt_template.replace('{target_language}', target_language)}', "
+                                f"process the following content items. Ensure correct relative order. Do NOT include html, head, or body tags."
                             )
                         else:
                             segment_id_prefix = item_filename
-                            current_prompt_instructions = base_prompt_for_full_doc
-                        
+                            prompt_for_btg_integration = universal_prompt_template.replace(
+                                "{target_language}", target_language
+                            )
+                        current_prompt_instructions = prompt_for_btg_integration
+
                         logger.info(f"Requesting XHTML for {'fragment' if is_fragment else 'document'}: {segment_id_prefix} ({len(segment_items)} items)")
                         
                         generated_segment_xhtml_str = self.btg_integration.generate_xhtml(

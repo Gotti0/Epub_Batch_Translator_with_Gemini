@@ -378,26 +378,31 @@ class AppService:
             if not self.translation_service:
                 raise BtgServiceException("TranslationService가 초기화되지 않았습니다.")
 
-            # 번역 설정 정보 로깅
+            # Get the universal prompt template from config
+            # This would have been set by EBTG or from BTG's own default if run standalone.
+            prompt_template_for_text_translation = self.config.get("universal_translation_prompt")
+            if prompt_template_for_text_translation is None:
+                # Fallback if "universal_translation_prompt" is not in config for some reason
+                prompt_template_for_text_translation = self.config_manager.get_default_config().get(
+                    "universal_translation_prompt", "Translate: {{slot}}"
+                )
+            # Ensure target_language is part of the prompt if the template expects it
+            target_lang_for_prompt = self.config.get("target_language", "ko") # Example, might need better source for target_lang
+            prompt_template_for_text_translation = prompt_template_for_text_translation.replace("{target_language}", target_lang_for_prompt)
+
             use_content_safety_retry = self.config.get("use_content_safety_retry", True)
             max_split_attempts = self.config.get("max_content_safety_split_attempts", 3)
             min_chunk_size = self.config.get("min_content_safety_chunk_size", 100)
             model_name = self.config.get("model_name", "gemini-2.0-flash")
-            
-            logger.debug(f"  ⚙️ 번역 설정: 모델={model_name}, 안전재시도={use_content_safety_retry}")
-            if use_content_safety_retry:
-                logger.debug(f"  🔄 검열 재시도 설정: 최대시도={max_split_attempts}, 최소크기={min_chunk_size}")
-                logger.info(f"  🔄 {current_chunk_info_msg} 번역 API 호출 시작...")
-                translation_start_time = time.time()
-                
+            translation_start_time = time.time()
             if use_content_safety_retry:
                 logger.debug(f"  🛡️ 콘텐츠 안전 재시도 모드로 번역 시작")
                 translated_chunk = self.translation_service.translate_text_with_content_safety_retry(
-                    chunk_text, max_split_attempts, min_chunk_size
+                    chunk_text, max_split_attempts, min_chunk_size, prompt_template=prompt_template_for_text_translation
                 )
             else:
                 logger.debug(f"  📝 일반 번역 모드로 번역 시작")
-                translated_chunk = self.translation_service.translate_text(chunk_text)
+                translated_chunk = self.translation_service.translate_text(chunk_text, prompt_template=prompt_template_for_text_translation)
             
             translation_time = time.time() - translation_start_time
             translated_length = len(translated_chunk) if translated_chunk else 0

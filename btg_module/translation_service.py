@@ -149,12 +149,8 @@ class TranslationService:
             logger.info(f"로어북 JSON 파일({lorebook_json_path_str})이 설정되지 않았거나 존재하지 않습니다. 동적 주입을 위해 로어북을 사용하지 않습니다.")
             self.lorebook_entries_for_injection = []
 
-    def _construct_prompt(self, chunk_text: str) -> str:
-        prompt_template = self.config.get("prompts", "Translate to Korean: {{slot}}")
-        if isinstance(prompt_template, (list, tuple)):
-            prompt_template = prompt_template[0] if prompt_template else "Translate to Korean: {{slot}}"
-
-        final_prompt = prompt_template
+    def _construct_prompt(self, chunk_text: str, prompt_template_str: str) -> str:
+        final_prompt = prompt_template_str
 
         # Determine the source language for the current chunk to filter lorebook entries
         config_source_lang = self.config.get("novel_language") # 통합된 설정 사용
@@ -238,13 +234,24 @@ class TranslationService:
         
         return final_prompt
 
-    def translate_text(self, text_chunk: str) -> str:
-        """기존 translate_text 메서드 (수정 없음)"""
+    def translate_text(self, text_chunk: str, prompt_template: Optional[str] = None) -> str:
         if not text_chunk.strip():
             return ""
+        
+        current_prompt_template = prompt_template
+        if current_prompt_template is None:
+            logger.warning("translate_text 호출 시 prompt_template이 제공되지 않았습니다. BTG 설정의 'universal_translation_prompt'를 사용합니다.")
+            current_prompt_template = self.config.get(
+                "universal_translation_prompt", "Translate to {target_language}: {{slot}}"
+            )
+            # {target_language} 플레이스홀더 처리 (여기서는 간단히 기본값으로 대체 또는 설정값 사용)
+            # 실제로는 AppService 레벨에서 target_language를 결정하여 프롬프트에 삽입 후 전달하는 것이 더 적절합니다.
+            # 여기서는 BTG 모듈 단독 실행 시의 fallback으로 가정합니다.
+            target_lang_for_prompt = self.config.get("target_language", "ko") # BTG config에 target_language가 있다면 사용
+            current_prompt_template = current_prompt_template.replace("{target_language}", target_lang_for_prompt)
 
         processed_text = text_chunk
-        prompt = self._construct_prompt(processed_text)
+        prompt = self._construct_prompt(processed_text, current_prompt_template)
 
         try:
             logger.debug(f"Gemini API 호출 시작. 모델: {self.config.get('model_name')}")
@@ -291,7 +298,8 @@ class TranslationService:
         self, 
         text_chunk: str, 
         max_split_attempts: int = 3,
-        min_chunk_size: int = 100
+        min_chunk_size: int = 100,
+        prompt_template: Optional[str] = None # 프롬프트 템플릿 인자 추가
     ) -> str:
         """
         콘텐츠 안전 오류 발생시 청크를 분할하여 재시도하는 번역 메서드
@@ -300,13 +308,14 @@ class TranslationService:
             text_chunk: 번역할 텍스트
             max_split_attempts: 최대 분할 시도 횟수
             min_chunk_size: 최소 청크 크기
-            
+            prompt_template: 번역에 사용할 프롬프트 템플릿
+
         Returns:
             번역된 텍스트 (실패한 부분은 오류 메시지로 대체)
         """
         try:
             # 1차 시도: 전체 청크 번역
-            return self.translate_text(text_chunk)
+            return self.translate_text(text_chunk, prompt_template=prompt_template)
             
         except BtgTranslationException as e:
             # 검열 오류가 아닌 경우 그대로 예외 발생
@@ -315,7 +324,7 @@ class TranslationService:
             
             logger.warning(f"콘텐츠 안전 문제 감지. 청크 분할 재시도 시작: {str(e)}")
             return self._translate_with_recursive_splitting(
-                text_chunk, max_split_attempts, min_chunk_size, current_attempt=1
+                text_chunk, max_split_attempts, min_chunk_size, current_attempt=1, prompt_template=prompt_template
             )
 
     def _translate_with_recursive_splitting(
@@ -323,7 +332,8 @@ class TranslationService:
         text_chunk: str,
         max_split_attempts: int,
         min_chunk_size: int,
-        current_attempt: int = 1
+        current_attempt: int = 1,
+        prompt_template: Optional[str] = None # 프롬프트 템플릿 인자 추가
     ) -> str:
     
         if current_attempt > max_split_attempts:
@@ -380,7 +390,7 @@ class TranslationService:
             start_time = time.time()
             
             try:
-                translated_part = self.translate_text(sub_chunk.strip())
+                translated_part = self.translate_text(sub_chunk.strip(), prompt_template=prompt_template)
                 processing_time = time.time() - start_time
                 
                 translated_parts.append(translated_part)

@@ -294,19 +294,11 @@ class BatchTranslatorGUI:
             self.novel_language_fallback_entry.insert(0, novel_lang_fallback_val)
             logger.debug(f"Config에서 가져온 novel_language_fallback: {novel_lang_fallback_val}")
 
-
-            prompts_val = config.get("prompts", "") 
-            logger.debug(f"Config에서 가져온 prompts: '{str(prompts_val)[:100]}...', 타입: {type(prompts_val)}")
-            self.prompt_text.delete('1.0', tk.END)
-            if isinstance(prompts_val, str):
-                self.prompt_text.insert('1.0', prompts_val)
-            elif isinstance(prompts_val, (list, tuple)) and prompts_val: 
-                self.prompt_text.insert('1.0', str(prompts_val[0]))
-            else: 
-                default_prompt_config = self.app_service.config_manager.get_default_config().get("prompts", "")
-                default_prompt_str = default_prompt_config[0] if isinstance(default_prompt_config, tuple) and default_prompt_config else str(default_prompt_config)
-                self.prompt_text.insert('1.0', default_prompt_str)
-                logger.warning(f"Prompts 타입이 예상과 다릅니다 ({type(prompts_val)}). 기본 프롬프트 사용.")
+            # "prompts" UI 요소가 제거되었으므로, 관련 로드 로직도 제거합니다.
+            # universal_translation_prompt는 BTG config에 저장되고 AppService가 사용합니다.
+            # BTG GUI에서 직접 편집하지 않습니다 (EBTG GUI에서 편집).
+            logger.debug(f"BTG GUI: 'prompts' UI 요소는 제거되었으므로 로드하지 않습니다. 'universal_translation_prompt'는 config에서 직접 사용됩니다.")
+            
             
             # Lorebook specific settings
             lorebook_json_path_val = config.get("lorebook_json_path") # Removed fallback to pronouns_csv
@@ -490,12 +482,6 @@ class BatchTranslatorGUI:
         self.novel_language_fallback_entry.insert(0, "ja")
         ttk.Label(language_settings_frame, text="(예: ko, ja, en)").grid(row=1, column=2, padx=5, pady=5, sticky="w")
         
-        # 번역 프롬프트
-        prompt_frame = ttk.LabelFrame(settings_frame, text="번역 프롬프트", padding="10")
-        prompt_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        self.prompt_text = scrolledtext.ScrolledText(prompt_frame, wrap=tk.WORD, height=8, width=70)
-        self.prompt_text.pack(fill="both", expand=True, padx=5, pady=5)
         
         # 콘텐츠 안전 재시도 설정
         content_safety_outer_frame = ttk.LabelFrame(settings_frame, text="콘텐츠 안전 재시도 설정", padding="10")
@@ -942,7 +928,6 @@ class BatchTranslatorGUI:
             self.output_file_entry.insert(0, str(suggested_output))
             suggested_lorebook_json = p.parent / f"{p.stem}{self.app_service.config.get('lorebook_output_json_filename_suffix', '_lorebook.json') if self.app_service else '_lorebook.json'}"
             self.lorebook_json_path_entry.delete(0, tk.END) # Changed
-            self.lorebook_json_path_entry.insert(0, str(suggested_lorebook_json))
 
     def _browse_output_file(self):
         filepath = filedialog.asksaveasfilename(title="출력 파일 선택", defaultextension=".txt", filetypes=(("텍스트 파일", "*.txt"), ("모든 파일", "*.*")))
@@ -966,7 +951,6 @@ class BatchTranslatorGUI:
             self.lorebook_json_path_entry.insert(0, filepath)
 
     def _get_config_from_ui(self) -> Dict[str, Any]:
-        prompt_content = self.prompt_text.get("1.0", tk.END).strip()
         use_vertex = self.use_vertex_ai_var.get()
 
         api_keys_str = self.api_keys_text.get("1.0", tk.END).strip()
@@ -1006,7 +990,8 @@ class BatchTranslatorGUI:
             "chunk_size": int(self.chunk_size_entry.get() or "6000"), 
             "max_workers": max_workers_val, 
             "requests_per_minute": rpm_val,
-            "prompts": prompt_content,
+            # "prompts"는 universal_translation_prompt로 대체되었으며, BTG GUI에서 직접 편집하지 않음.
++           # AppService는 config 파일에서 universal_translation_prompt를 읽어 사용.
             "novel_language": self.novel_language_entry.get().strip() or "auto",
             "novel_language_fallback": self.novel_language_fallback_entry.get().strip() or "ja",
             # Lorebook settings
