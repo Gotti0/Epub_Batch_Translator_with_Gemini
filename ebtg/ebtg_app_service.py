@@ -3,7 +3,7 @@
 import xml.etree.ElementTree as ET
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, List # List 추가
+from typing import Dict, Any, Optional, List, Callable # List 추가, Callable 추가
 
 # Assuming these services and DTOs are defined in the ebtg package
 from .epub_processor_service import EpubProcessorService, EpubXhtmlItem # Assuming EpubXhtmlItem DTO
@@ -14,6 +14,7 @@ from common.progress_persistence_service import ProgressPersistenceService
 from .epub_validation_service import EpubValidationService # Import EpubValidationService
 from .quality_monitor_service import QualityMonitorService # Import QualityMonitorService
 from .ebtg_exceptions import EbtgProcessingError, XhtmlExtractionError, ApiXhtmlGenerationError
+from .ebtg_dtos import EpubProcessingProgressDTO # DTO 추가
 from .config_manager import EbtgConfigManager # Assuming a config manager for EBTG
 
 # Assuming BTG module is accessible
@@ -202,14 +203,19 @@ class EbtgAppService:
         logger.info(f"Successfully extracted approximately {len(full_text)} characters of text from {epub_path}.")
         return full_text
 
-    def translate_epub(self, input_epub_path: str, output_epub_path: str) -> None:
+    def translate_epub(
+        self,
+        input_epub_path: str,
+        output_epub_path: str,
+        progress_callback: Optional[Callable[[EpubProcessingProgressDTO], None]] = None
+    ) -> None:
         """
         Processes an EPUB file: extracts XHTML content, sends it for translation
         (XHTML generation) via BTG module, and reassembles the EPUB.
-
         Args:
             input_epub_path: Path to the input EPUB file.
             output_epub_path: Path to save the translated EPUB file.
+            progress_callback: Optional callback function to report progress.
         """
         logger.info(f"Starting EPUB translation for: {input_epub_path}")
         Path(output_epub_path).parent.mkdir(parents=True, exist_ok=True)
@@ -224,6 +230,15 @@ class EbtgAppService:
             total_files = len(xhtml_items)
             processed_files = 0
             files_with_errors = 0
+
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(
+                    total_files=total_files,
+                    processed_files=processed_files,
+                    current_file_name=None,
+                    errors_count=files_with_errors,
+                    status_message="EPUB 처리 시작..."
+                ))
 
             logger.info(f"Found {total_files} XHTML files to process.")
             target_language = self.config.get("target_language", "ko")
@@ -243,6 +258,15 @@ class EbtgAppService:
                 generated_xhtml_for_item_successfully = False
 
                 logger.info(f"Processing file {processed_files}/{total_files}: {item_filename}")
+                if progress_callback:
+                    progress_callback(EpubProcessingProgressDTO(
+                        total_files=total_files,
+                        processed_files=processed_files -1, # Current file is being processed
+                        current_file_name=item_filename,
+                        errors_count=files_with_errors,
+                        status_message=f"파일 처리 중: {item_filename}"
+                    ))
+
 
                 try:
                     original_xhtml_content_str = xhtml_item.original_content_bytes.decode('utf-8', errors='replace')
@@ -385,6 +409,15 @@ class EbtgAppService:
                     self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "failed_unexpected_fallback", str(e_unexpected))
                     files_with_errors += 1
             
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(
+                    total_files=total_files,
+                    processed_files=processed_files,
+                    current_file_name=None,
+                    errors_count=files_with_errors,
+                    status_message="EPUB 처리 완료, 저장 중..."
+                ))
+
             logger.info("All XHTML files processed. Saving new EPUB...")
             self.epub_processor.save_epub(output_epub_path)
             self.progress_service.save_progress(output_epub_path) # Save all accumulated progress
@@ -409,10 +442,28 @@ class EbtgAppService:
             if files_with_errors > 0:
                 logger.warning(f"{files_with_errors}/{total_files} files encountered errors and fallback content was used.")
 
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(
+                    total_files=total_files,
+                    processed_files=processed_files,
+                    current_file_name=None,
+                    errors_count=files_with_errors,
+                    status_message="EPUB 번역 완료!"
+                ))
+
         except FileNotFoundError as e:
             logger.error(f"Input EPUB file not found: {input_epub_path} - {e}")
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(total_files=0, processed_files=0, errors_count=1, status_message=f"오류: 입력 파일을 찾을 수 없습니다 - {Path(input_epub_path).name}"))
             raise EbtgProcessingError(f"Input EPUB not found: {input_epub_path}") from e
         except Exception as e:
             logger.error(f"An error occurred during EPUB translation: {e}", exc_info=True)
             self.progress_service.save_progress(output_epub_path) # Attempt to save progress even if main process fails
+            if progress_callback:
+                progress_callback(EpubProcessingProgressDTO(
+                    total_files=total_files if 'total_files' in locals() else 0, 
+                    processed_files=processed_files if 'processed_files' in locals() else 0, 
+                    errors_count=files_with_errors + 1 if 'files_with_errors' in locals() else 1, 
+                    status_message=f"EPUB 번역 중 심각한 오류: {e}"
+                ))
             raise EbtgProcessingError(f"EPUB translation failed: {e}") from e
