@@ -143,6 +143,65 @@ class EbtgAppService:
                 "<p>[Error generating fallback content]</p>", f"Fallback Error - {title}", lang
             )
 
+    def get_all_text_from_epub(self, epub_path: str) -> str:
+        """
+        Extracts all textual content from the XHTML files within an EPUB.
+
+        Args:
+            epub_path: Path to the EPUB file.
+
+        Returns:
+            A single string containing all extracted text, joined by double newlines.
+            Returns an empty string if no text is found or if XHTML items are missing.
+
+        Raises:
+            FileNotFoundError: If the EPUB file does not exist.
+            EbtgProcessingError: For other critical errors during EPUB processing or text extraction.
+        """
+        logger.info(f"Attempting to extract all text from EPUB: {epub_path}")
+        try:
+            # Ensure the epub_processor is set for the correct book.
+            # open_epub will clear previous state and load the new EPUB.
+            self.epub_processor.open_epub(epub_path)
+        except FileNotFoundError:
+            logger.error(f"EPUB file not found for text extraction: {epub_path}")
+            raise # Re-raise for the caller to handle
+        except Exception as e:
+            logger.error(f"Failed to open EPUB {epub_path} for text extraction: {e}", exc_info=True)
+            raise EbtgProcessingError(f"Failed to open EPUB {epub_path}: {e}") from e
+
+        xhtml_items: List[EpubXhtmlItem] = self.epub_processor.get_xhtml_items()
+
+        if not xhtml_items:
+            logger.warning(f"No XHTML items found in {epub_path}. Returning empty text.")
+            return ""
+
+        all_text_parts: List[str] = []
+        for xhtml_item in xhtml_items:
+            logger.debug(f"Extracting text from XHTML item: {xhtml_item.filename}")
+            try:
+                original_xhtml_content_str = xhtml_item.original_content_bytes.decode('utf-8', errors='replace')
+                content_items = self.html_extractor.extract_content(original_xhtml_content_str)
+                for item_dict in content_items:
+                    if item_dict.get("type") == "text":
+                        text_data = item_dict.get("data", "")
+                        if text_data.strip():  # Ensure non-empty, stripped text
+                            all_text_parts.append(text_data.strip())
+            except UnicodeDecodeError as ude:
+                logger.warning(f"Unicode decode error for {xhtml_item.filename}: {ude}. Skipping text from this item.")
+            except XhtmlExtractionError as xee:
+                logger.warning(f"XHTML extraction error for {xhtml_item.filename}: {xee}. Skipping text from this item.")
+            except Exception as e_item:
+                logger.error(f"Unexpected error processing text from {xhtml_item.filename}: {e_item}", exc_info=True)
+        
+        if not all_text_parts:
+            logger.info(f"No textual content was extracted from any XHTML file in {epub_path}.")
+            return ""
+
+        full_text = "\n\n".join(all_text_parts)
+        logger.info(f"Successfully extracted approximately {len(full_text)} characters of text from {epub_path}.")
+        return full_text
+
     def translate_epub(self, input_epub_path: str, output_epub_path: str) -> None:
         """
         Processes an EPUB file: extracts XHTML content, sends it for translation

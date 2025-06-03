@@ -1052,10 +1052,6 @@ class EbtgGui:
                     raise Exception("EBTG AppService is not initialized.")
                 
                 epub_full_text = self.ebtg_app_service.get_all_text_from_epub(input_epub_path)
-                if epub_full_text is None: # Handle case where text extraction might fail or return None
-                    self.root.after(0, lambda: messagebox.showerror("오류", "EPUB에서 텍스트를 추출하지 못했습니다.")) # 이미 한국어
-                    self.root.after(0, lambda: self.btg_lorebook_progress_label.config(text="EPUB 텍스트 추출 실패"))
-                    return
 
                 if not epub_full_text.strip():
                     self.root.after(0, lambda: messagebox.showinfo("정보", "EPUB에서 추출할 텍스트 내용이 없습니다.")) # 이미 한국어
@@ -1080,10 +1076,10 @@ class EbtgGui:
                         self.root.after(0, lambda: self._display_btg_lorebook_content(f_res.read()))
             except (BtgFileHandlerException, BtgApiClientException, BtgServiceException, BtgBusinessLogicException) as e_btg:
                 logging.getLogger(__name__).error(f"로어북 추출 중 BTG 예외: {e_btg}", exc_info=True)
-                self.root.after(0, lambda: messagebox.showerror("추출 오류", f"로어북 추출 중 오류: {e_btg}")) # 이미 한국어
+                self.root.after(0, lambda exc=e_btg: messagebox.showerror("추출 오류", f"로어북 추출 중 오류: {exc}")) # 이미 한국어
             except Exception as e_unknown: # type: ignore
                 logging.getLogger(__name__).error(f"로어북 추출 중 알 수 없는 예외: {e_unknown}", exc_info=True)
-                self.root.after(0, lambda: messagebox.showerror("알 수 없는 오류", f"로어북 추출 중 예상치 못한 오류: {e_unknown}")) # 이미 한국어
+                self.root.after(0, lambda exc=e_unknown: messagebox.showerror("알 수 없는 오류", f"로어북 추출 중 예상치 못한 오류: {exc}")) # 이미 한국어
             finally:
                 logging.getLogger(__name__).info("로어북 추출 스레드 종료.") # 이미 한국어
 
