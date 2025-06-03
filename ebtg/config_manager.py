@@ -23,12 +23,19 @@ class EbtgConfigManager:
             "ebtg_lorebook_json_path": None, # Path for EBTG's primary lorebook
             "ebtg_max_lorebook_entries_injection": 5, # Max EBTG lorebook entries to inject into prompt
             "ebtg_max_lorebook_chars_injection": 1000,  # Max EBTG lorebook chars to inject into prompt
-            "text_chunk_target_chars": 3000, # Target character length for plain text chunks sent to BTG for fragment translation.
-            "text_fragment_prompt_template": ( # Prompt template for BTG to translate a text chunk and wrap it in a simple XHTML fragment (e.g., <p>)
-                "Please translate the following text into {target_language}. "
-                "Your response should be ONLY the translated text, wrapped in a single paragraph tag (e.g., <p>Translated text.</p>). "
-                "Ensure no other HTML structure (like html, head, body tags) is included.\n\n"
-                "# Lorebook Context (if provided, consider for translation):\n{ebtg_lorebook_context}\n\n# Text to Translate:\n{{slot}}")
+            "text_chunk_target_chars": 3000 # Target character length for plain text chunks sent to BTG for fragment translation.
+            # "text_fragment_prompt_template" is now merged into "universal_translation_prompt"
+            # The {{else}} block of universal_translation_prompt should be updated to handle fragment translation:
+            # Example for the {{else}} block within universal_translation_prompt:
+            # {{else}}
+            # **텍스트 조각 (XHTML 단편으로 번역):**
+            # The following text is a fragment that needs to be translated into {target_language}.
+            # Your response MUST be ONLY the translated text, wrapped in a single paragraph tag (e.g., <p>Translated text.</p>).
+            # Do NOT include any other HTML structure such as html, head, or body tags.
+            # Refer to the LOREBOOK_CONTEXT provided earlier if applicable.
+            # Text to Translate:
+            # {{slot}}
+            # {{/if}}
      }
 
     def load_config(self) -> Dict[str, Any]:

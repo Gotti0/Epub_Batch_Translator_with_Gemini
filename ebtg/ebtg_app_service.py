@@ -657,7 +657,10 @@ class EbtgAppService:
 
                     # Prepare prompt and lorebook context
                     # The prompt template from config will have {target_language}, {ebtg_lorebook_context}, and {{slot}}
-                    prompt_template_for_fragments = self.config.get("text_fragment_prompt_template")
+                    # Use the universal_translation_prompt, its {{else}} block is now designed for fragment generation.
+                    prompt_template_for_fragments = self.config.get("universal_translation_prompt")
+                    if not prompt_template_for_fragments: # Fallback if key is missing for some reason
+                        raise EbtgProcessingError("Universal translation prompt is not configured in EBTG settings.")
                     ebtg_lorebook_context_for_item = self._get_relevant_lorebook_context_for_extracted_elements(extracted_elements)
 
                     # Create request DTO for BtgIntegrationService
