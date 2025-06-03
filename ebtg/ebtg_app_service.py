@@ -290,7 +290,13 @@ class EbtgAppService:
                 prompt_cleaned_for_fragment, flags=re.DOTALL | re.IGNORECASE
             )
             if "{{lorebook_context}}" in prompt_cleaned_for_fragment:
-                prompt_cleaned_for_fragment = prompt_cleaned_for_fragment.replace("{{lorebook_context}}", "(로어북 컨텍스트는 이 XHTML 조각 생성 작업의 일부가 아닐 수 있습니다.)")
+                # For fragment mode, if we want to inject segment-specific lorebook,
+                # we should NOT replace the placeholder here.
+                # Instead, let the common injection logic below handle it using task.ebtg_lorebook_context_for_segment.
+                # If the intention was to explicitly EXCLUDE lorebook for fragments, the original line was correct.
+                # Assuming per-fragment lorebook is desired:
+                pass # Keep {{lorebook_context}} placeholder for later injection
+            
 
             fragment_directive = (
                 "\n\nIMPORTANT INSTRUCTION FOR THIS SPECIFIC TASK (FRAGMENT MODE):\n"
