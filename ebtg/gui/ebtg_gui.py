@@ -116,10 +116,8 @@ class ScrollableFrame:
             widget_to_bind.bind("<Button-4>", _on_mousewheel, add="+") # For Linux scroll up
             widget_to_bind.bind("<Button-5>", _on_mousewheel, add="+") # For Linux scroll down
 
-        # Recursively bind to children of scrollable_frame if needed,
-        # or ensure focus is correctly managed.
-        # For simplicity, focusing the canvas when the mouse enters its area is a common approach.
-        self.main_frame.bind('<Enter>', lambda e: self.canvas.focus_set()) 
+        # Removed: self.main_frame.bind('<Enter>', lambda e: self.canvas.focus_set())
+        # This line was likely causing the canvas to steal focus, preventing input fields from being focused.
         # Optionally, clear focus or set to another widget on <Leave> if it causes issues.
         # e.g., self.main_frame.bind('<Leave>', lambda e: self.main_frame.focus_set())
 
@@ -247,6 +245,10 @@ class EbtgGui:
             return
         self._load_ebtg_settings_to_ui()
         self._update_model_list_ui() # Initial model list load
+        # Explicitly set focus to the first interactive widget
+        if hasattr(self, 'input_epub_entry') and self.input_epub_entry.winfo_exists():
+            self.input_epub_entry.focus_set()
+            logging.getLogger(__name__).info("Explicitly set focus to input_epub_entry after UI initialization.")
 
     def _create_epub_translation_widgets(self, parent_frame):
         # --- File Selection Frame ---
