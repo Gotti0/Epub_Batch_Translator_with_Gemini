@@ -482,11 +482,14 @@ class EbtgAppService:
             try:
                 original_xhtml_content_str = xhtml_item.original_content_bytes.decode('utf-8', errors='replace')
                 content_items = self.html_extractor.extract_content(original_xhtml_content_str)
-                for item_dict in content_items:
-                    if item_dict.get("type") == "text":
-                        text_data = item_dict.get("data", "")
-                        if text_data.strip():  # Ensure non-empty, stripped text
-                            all_text_parts.append(text_data.strip())
+                for element_obj in content_items: # Renamed item_dict to element_obj for clarity
+                    if isinstance(element_obj, TextBlock):
+                        if element_obj.text_content and element_obj.text_content.strip(): # Ensure non-empty, stripped text
+                            all_text_parts.append(element_obj.text_content.strip())
+                    # If ImageInfo alt text also needs to be extracted here, add:
+                    # elif isinstance(element_obj, ImageInfo) and element_obj.original_alt and element_obj.original_alt.strip():
+                    #     all_text_parts.append(element_obj.original_alt.strip())
+            
             except UnicodeDecodeError as ude:
                 logger.warning(f"Unicode decode error for {xhtml_item.filename}: {ude}. Skipping text from this item.")
             except XhtmlExtractionError as xee:
@@ -588,7 +591,10 @@ class EbtgAppService:
                     # This is now replaced by extracting plain text, chunking it, and sending it for fragment translation.
 
                     logger.info(f"[{item_filename}] Starting Phase 3: Text extraction and preparation for BTG.")
-                    alt_text_id_counter = 0
+                    
+                    texts_for_translation_for_item: List[str] = []
+                    alt_text_details_map: Dict[str, Tuple[ImageInfo, str]] = {} # Value: (ImageInfo_object, original_alt_text)
+                    alt_text_id_counter = 0 # Reset for each item
 
                     for element_idx, element_obj in enumerate(extracted_elements):
                         if isinstance(element_obj, TextBlock):

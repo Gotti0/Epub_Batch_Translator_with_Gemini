@@ -5,10 +5,15 @@ from typing import Dict, Any, Optional, Union, List
 import os # os 모듈 임포트
 
 try:
+    from .logger_config import setup_logger # .logger_config에서 setup_logger 임포트
     from .file_handler import read_json_file, write_json_file
 except ImportError:
+    from logger_config import setup_logger # fallback
     from file_handler import read_json_file, write_json_file
 
+
+# 이 모듈의 로거 설정
+logger = setup_logger(__name__)
 
 DEFAULT_CONFIG_FILENAME = "config.json"
 
@@ -25,7 +30,9 @@ class ConfigManager:
             config_file_path (Optional[Union[str, Path]], optional):
                 설정 파일의 경로. None이면 기본값 'config.json'을 사용합니다.
         """
+        self._explicitly_provided_path = config_file_path is not None
         self.config_file_path = Path(config_file_path) if config_file_path else Path(DEFAULT_CONFIG_FILENAME)
+        logger.debug(f"ConfigManager initialized. Explicit path: {self._explicitly_provided_path}, Resolved path: {self.config_file_path}")
 
     def get_default_config(self) -> Dict[str, Any]:
         """
@@ -137,22 +144,32 @@ class ConfigManager:
 
 
                 return final_config
-            elif use_default_if_missing:
-                print(f"정보: 설정 파일 '{self.config_file_path}'을(를) 찾을 수 없습니다. 기본 설정을 사용합니다.")
-                return self.get_default_config()
-            else:
-                raise FileNotFoundError(f"설정 파일 '{self.config_file_path}'을(를) 찾을 수 없습니다.")
+            # 파일이 존재하지 않는 경우의 처리
+            elif self._explicitly_provided_path: # 명시적 경로가 주어졌으나 파일이 없는 경우
+                if use_default_if_missing:
+                    logger.info(f"명시된 설정 파일 '{self.config_file_path}'을(를) 찾을 수 없습니다. 기본 설정을 사용합니다.")
+                    return self.get_default_config()
+                else:
+                    raise FileNotFoundError(f"명시된 설정 파일 '{self.config_file_path}'을(를) 찾을 수 없습니다.")
+            else: # 명시적 경로가 주어지지 않았고, 기본 경로에도 파일이 없는 경우 (예: config.json 부재)
+                if use_default_if_missing:
+                    logger.debug(f"기본 설정 파일 '{self.config_file_path}'을(를) 찾을 수 없습니다. 메시지 없이 기본 설정을 사용합니다.")
+                    return self.get_default_config() # 메시지 없이 기본값 반환
+                else:
+                    raise FileNotFoundError(f"기본 설정 파일 '{self.config_file_path}'을(를) 찾을 수 없으며, 기본값 사용이 비활성화되었습니다.")
+
+
         except json.JSONDecodeError as e:
-            print(f"오류: 설정 파일 '{self.config_file_path}' 파싱 중 오류 발생: {e}")
+            logger.error(f"설정 파일 '{self.config_file_path}' 파싱 중 오류 발생: {e}")
             if use_default_if_missing:
-                print("정보: 기본 설정을 사용합니다.")
+                logger.info("파싱 오류로 인해 기본 설정을 사용합니다.")
                 return self.get_default_config()
             else:
                 raise
         except Exception as e:
-            print(f"오류: 설정 파일 '{self.config_file_path}' 로드 중 오류 발생: {e}")
+            logger.error(f"설정 파일 '{self.config_file_path}' 로드 중 오류 발생: {e}")
             if use_default_if_missing:
-                print("정보: 기본 설정을 사용합니다.")
+                logger.info("로드 오류로 인해 기본 설정을 사용합니다.")
                 return self.get_default_config()
             else:
                 raise
@@ -185,10 +202,10 @@ class ConfigManager:
 
 
             write_json_file(self.config_file_path, config_data, indent=4)
-            print(f"정보: 설정이 '{self.config_file_path}'에 성공적으로 저장되었습니다.")
+            logger.info(f"설정이 '{self.config_file_path}'에 성공적으로 저장되었습니다.")
             return True
         except Exception as e:
-            print(f"오류: 설정 파일 '{self.config_file_path}' 저장 중 오류 발생: {e}")
+            logger.error(f"설정 파일 '{self.config_file_path}' 저장 중 오류 발생: {e}", exc_info=True)
             return False
 
 if __name__ == '__main__':

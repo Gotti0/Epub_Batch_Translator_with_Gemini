@@ -52,14 +52,14 @@ class SimplifiedHtmlExtractor:
                             image_info = ImageInfo(
                                 original_tag_string=original_tag_string,
                                 src=src,
-                                original_alt=original_alt
+                                original_alt=alt
                             )
                             content_items.append(image_info)
-                            logger.debug(f"Extracted image: src='{src}', alt='{original_alt}'")
+                            logger.debug(f"Extracted image: src='{src}', alt='{alt}'")
                         else:
                             logger.warning("Found <img> tag with no src attribute. Skipping image item, but processed preceding text if any.")
                     # Block-level or significant separator tags that should finalize any pending text.
-                    elif element.name in ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'hr', 'table', 'ul', 'ol', 'dl']:
+                    elif element.name in ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'hr', 'table', 'ul', 'ol', 'dl', 'blockquote', 'pre', 'figure', 'figcaption']:
                         if current_text_parts:
                             text_block_content = " ".join(current_text_parts)
                             content_items.append(TextBlock(text_content=text_block_content))
