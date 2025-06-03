@@ -743,45 +743,7 @@ class EbtgAppService:
                         
                         # --- Phase 5: Reassembly ---
                         logger.info(f"[{item_filename}] Starting Phase 5: EPUB Reassembly.")
-                        reassembled_xhtml_parts: List[str] = []
-                        translated_chunk_iter = iter(ordered_translated_fragments) # Use the ordered list of fragments
-
-                        for element in extracted_elements:
-                            if isinstance(element, TextBlock):
-                                if element.text_content.strip(): # This TextBlock contributed.
-                                    try:
-                                        translated_block_content = next(translated_item_iter)
-                                        # If a single TextBlock was split into multiple text_chunks_for_btg,
-                                        # we need to concatenate their translations.
-                                        # This requires knowing how many chunks correspond to this TextBlock.
-                                        # The current `source_text_item_to_btg_chunks_map` helps here.
-                                        # We need to map `element` back to its original index in `texts_for_translation_for_item`.
-                                        # This part of reassembly needs refinement if a single TextBlock can be split.
-                                        # For now, assuming one-to-one or that `translated_item_iter` handles it.
-                                        # The parallel execution now returns fragments per original chunk.
-                                        # We need to re-concatenate fragments if an original text item was sub-chunked.
-                                        reassembled_xhtml_parts.append(translated_block_content) # This needs to be fixed if sub-chunking happened
-                                    except StopIteration:
-                                        logger.error(f"[{item_filename}] Reassembly error: Ran out of translated body fragments for TextBlocks.")
-                                        reassembled_xhtml_parts.append(f"<p>[Translation Error for TextBlock: {element.text_content[:30]}]</p>")
-                                        files_with_errors += 1
-                            elif isinstance(element, ImageInfo): # Ensure this elif is at the same level as the if above
-                                translated_alt_text = element.original_alt # Default to original
-                                if element.original_alt and element.original_alt.strip(): # This ImageInfo's alt contributed.
-                                    try:
-                                        translated_alt_fragment = next(translated_chunk_iter) # Use the correct iterator
-                                        soup_alt = BeautifulSoup(translated_alt_fragment, 'html.parser')
-                                        translated_alt_text = soup_alt.get_text().strip()
-                                        logger.debug(f"Using translated alt '{translated_alt_text}' for image src '{element.src}'")
-                                    except StopIteration:
-                                        logger.error(f"[{item_filename}] Reassembly error: Ran out of translated alt text fragments.")
-                                    except Exception as e_alt_parse:
-                                        logger.warning(f"Failed to parse alt text fragment '{str(translated_alt_fragment)[:50]}...': {e_alt_parse}. Using original alt for {element.src}")
-                                final_alt_text_for_tag = translated_alt_text if translated_alt_text else ""
-                                updated_img_tag = re.sub(r'alt=".*?"', f'alt="{final_alt_text_for_tag}"', element.original_tag_string, flags=re.IGNORECASE)
-                                if f'alt="{final_alt_text_for_tag}"' not in updated_img_tag: # Corrected indent for this if
-                                    updated_img_tag = re.sub(r'(<img[^>]*?)(\s*\/?>)', rf'\1 alt="{final_alt_text_for_tag}"\2', element.original_tag_string) # Corrected indent for content
-                                reassembled_xhtml_parts.append(updated_img_tag)
+                        
                         
                         # Refined Reassembly Logic:
                         # Iterate through original `texts_for_translation_for_item` and use `source_text_item_to_btg_chunks_map`
