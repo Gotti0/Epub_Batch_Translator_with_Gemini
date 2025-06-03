@@ -8,6 +8,7 @@ import queue # For thread-safe log communication
 import io # For TqdmToTkinter
 from pathlib import Path
 import json # For JSON operations in settings
+import time # For time tracking
 
 # Assuming EbtgAppService is in the same directory or package
 try:
@@ -183,6 +184,7 @@ class EbtgGui:
         self.root.title("EBTG - EPUB 일괄 번역기 (Gemini)")
         self.root.geometry("900x750") # Adjusted size
 
+        self.translation_start_time: Optional[float] = None # 번역 시작 시간 기록
         self.ebtg_app_service: EbtgAppService | None = None
         self.translation_thread: threading.Thread | None = None
         self._stop_event = threading.Event() 
@@ -935,6 +937,13 @@ class EbtgGui:
             self.status_var.set(f"예상치 못한 오류: 로그를 확인하세요.")
         finally:
             if hasattr(self, 'start_button'): self.start_button.config(state=tk.NORMAL)
+            
+            final_status_message = self.status_var.get()
+            if self.translation_start_time:
+                total_elapsed_seconds = time.monotonic() - self.translation_start_time
+                formatted_total_elapsed = self._format_time(total_elapsed_seconds)
+                final_status_message += f" (총 소요 시간: {formatted_total_elapsed})"
+                self.status_var.set(final_status_message)
             if hasattr(self, 'stop_button'): self.stop_button.config(state=tk.DISABLED)
             self._stop_event.clear() 
 
@@ -957,6 +966,7 @@ class EbtgGui:
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
         self.status_var.set("번역 시작 중...")
+        self.translation_start_time = time.monotonic() # 번역 시작 시간 기록
         
         # --- EbtgAppService.translate_epub에 콜백 전달 ---
         # EbtgAppService.translate_epub이 progress_callback 인자를 받도록 수정되었다고 가정
@@ -1005,11 +1015,28 @@ class EbtgGui:
             progress_percentage = (progress_dto.processed_files / progress_dto.total_files) * 100
             self.progress_bar['value'] = progress_percentage
         else:
-            self.progress_bar['value'] = 0
+            self.progress_bar['value'] = 0 # Handle division by zero if total_files is 0
 
-        status_msg = f"{progress_dto.status_message} "
+        base_status_msg = f"{progress_dto.status_message} "
         if progress_dto.current_file_name: status_msg += f"({progress_dto.current_file_name}) "
         status_msg += f"{progress_dto.processed_files}/{progress_dto.total_files} 파일"
+        
+        time_info_str = ""
+        if self.translation_start_time and progress_dto.total_files > 0:
+            elapsed_seconds = time.monotonic() - self.translation_start_time
+            formatted_elapsed = self._format_time(elapsed_seconds)
+            time_info_str = f" (경과: {formatted_elapsed}"
+
+            if progress_dto.processed_files > 0 and progress_dto.processed_files < progress_dto.total_files:
+                avg_time_per_file = elapsed_seconds / progress_dto.processed_files
+                remaining_files = progress_dto.total_files - progress_dto.processed_files
+                eta_seconds = remaining_files * avg_time_per_file
+                formatted_eta = self._format_time(eta_seconds)
+                time_info_str += f", ETA: {formatted_eta}"
+            time_info_str += ")"
+        
+        status_msg += time_info_str
+
         if progress_dto.errors_count > 0: status_msg += f", Errors: {progress_dto.errors_count}"
         self.status_var.set(status_msg)
 
@@ -1123,6 +1150,14 @@ class EbtgGui:
                 messagebox.showinfo("성공", f"로어북이 성공적으로 저장되었습니다: {filepath}") # 이미 한국어
             except Exception as e: # type: ignore
                 messagebox.showerror("오류", f"로어북 저장 실패: {e}") # 이미 한국어
+
+    def _format_time(self, seconds: float) -> str:
+        """Helper function to format seconds into HH:MM:SS string."""
+        if seconds < 0: return "00:00:00"
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 if __name__ == '__main__':
