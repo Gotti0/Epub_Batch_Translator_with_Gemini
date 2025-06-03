@@ -17,13 +17,12 @@ class EbtgConfigManager:
             ),
             "btg_config_path": None, # Path to btg_module's config.json, or None to use BTG's default
             # "content_segmentation_max_items": 0, # Replaced by xhtml_segment_target_chars
-            "xhtml_segment_target_chars": 4000, # Target character length for XHTML content items per segment. 0 or negative means no char-based segmentation.
+            "segment_character_limit": 4000, # Unified: Target char length for XHTML content items (EBTG), plain text chunks for fragment translation (EBTG), and general text chunking (BTG).
             "perform_epub_validation": True, # New option to control EPUB validation
             "perform_content_omission_check": True, # New option for content omission check
             "ebtg_lorebook_json_path": None, # Path for EBTG's primary lorebook
             "ebtg_max_lorebook_entries_injection": 5, # Max EBTG lorebook entries to inject into prompt
             "ebtg_max_lorebook_chars_injection": 1000,  # Max EBTG lorebook chars to inject into prompt
-            "text_chunk_target_chars": 3000 # Target character length for plain text chunks sent to BTG for fragment translation.
             # "text_fragment_prompt_template" is now merged into "universal_translation_prompt"
             # The {{else}} block of universal_translation_prompt should be updated to handle fragment translation:
             # Example for the {{else}} block within universal_translation_prompt:

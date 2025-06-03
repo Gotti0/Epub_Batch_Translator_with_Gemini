@@ -4,7 +4,7 @@ from pathlib import Path
 from .logger_config import setup_logger
 from .exceptions import BtgChunkingException # BtgFileHandlerException removed as per comment
 
-logger = setup_logger(__name__)
+logger = setup_logger(__name__) # type: ignore
 
 DEFAULT_MAX_CHUNK_SIZE = 6000
 

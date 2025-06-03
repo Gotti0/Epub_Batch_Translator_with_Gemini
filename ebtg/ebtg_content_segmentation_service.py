@@ -26,7 +26,7 @@ class ContentSegmentationService:
         self,
         content_items: List[Dict[str, Any]],
         file_name: str, # For logging purposes
-        target_char_length_per_segment: int  # Changed from max_items_per_segment
+        target_char_length_per_segment: int
     ) -> List[List[Dict[str, Any]]]:
         """
         Segments a list of content items into one or more "document fragments"

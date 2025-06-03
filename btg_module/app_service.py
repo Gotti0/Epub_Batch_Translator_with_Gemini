@@ -607,7 +607,10 @@ class AppService:
                 with self._translation_lock: self.is_translation_running = False
                 return
 
-            all_chunks: List[str] = self.chunk_service.create_chunks_from_file_content(file_content, self.config.get("chunk_size", 6000))
+            # Use the unified 'segment_character_limit' from config.
+            # BTG's ConfigManager provides a default for this if run standalone.
+            # If run via EBTG, EBTG's config value for 'segment_character_limit' will be in self.config.
+            all_chunks: List[str] = self.chunk_service.create_chunks_from_file_content(file_content, self.config.get("segment_character_limit", 6000))
             total_chunks = len(all_chunks) 
             logger.info(f"총 {total_chunks}개의 청크로 분할됨.")
 

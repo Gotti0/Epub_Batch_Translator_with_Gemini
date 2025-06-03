@@ -454,7 +454,8 @@ class LorebookService:
             else:
                 logger.warning(f"제공된 시드 로어북 경로를 찾을 수 없거나 파일이 아닙니다: {seed_lorebook_path}")
         
-        # ChunkService를 사용하여 텍스트를 세그먼트로 분할
+        # ChunkService를 사용하여 텍스트를 세그먼트로 분할.
+        # lorebook_chunk_size는 번역용 segment_character_limit과 다를 수 있으므로 별도 설정 유지.
         lorebook_segment_size = self.config.get("lorebook_chunk_size", self.config.get("chunk_size", 8000))
         all_text_segments = self.chunk_service.create_chunks_from_file_content(
             novel_text_content, lorebook_segment_size

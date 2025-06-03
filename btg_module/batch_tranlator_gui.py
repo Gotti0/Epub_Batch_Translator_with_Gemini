@@ -258,7 +258,7 @@ class BatchTranslatorGUI:
 
 
             top_p_val = config.get("top_p", 0.9)
-            logger.debug(f"Config에서 가져온 top_p: {top_p_val}, 타입: {type(top_p_val)}")
+            logger.debug(f"Config에서 가져온 top_p: {top_p_val}, 타입: {type(top_p_val)}") # type: ignore
             try:
                 self.top_p_scale.set(float(top_p_val))
                 self.top_p_label.config(text=f"{self.top_p_scale.get():.2f}") 
@@ -268,10 +268,10 @@ class BatchTranslatorGUI:
                 self.top_p_scale.set(default_top_p)
                 self.top_p_label.config(text=f"{default_top_p:.2f}")
 
-            chunk_size_val = config.get("chunk_size", 6000)
-            logger.debug(f"Config에서 가져온 chunk_size: {chunk_size_val}")
-            self.chunk_size_entry.delete(0, tk.END)
-            self.chunk_size_entry.insert(0, str(chunk_size_val))
+            # chunk_size는 segment_character_limit으로 통합. BTG GUI에서는 이 값을 직접 설정하지 않음.
+            # BTG AppService는 config에서 segment_character_limit을 읽어 사용.
+            segment_char_limit_val = config.get("segment_character_limit", 6000) # BTG의 기본값
+            logger.debug(f"Config에서 가져온 segment_character_limit (BTG용): {segment_char_limit_val}")
             
             max_workers_val = config.get("max_workers", 4)
             logger.debug(f"Config에서 가져온 max_workers: {max_workers_val}")
@@ -446,9 +446,10 @@ class BatchTranslatorGUI:
         chunk_worker_frame = ttk.Frame(file_chunk_frame)
         chunk_worker_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=5)
         
-        ttk.Label(chunk_worker_frame, text="청크 크기:").pack(side="left", padx=(0,5))
-        self.chunk_size_entry = ttk.Entry(chunk_worker_frame, width=10)
-        self.chunk_size_entry.pack(side="left", padx=(0,15))
+        # 청크 크기(chunk_size) UI 요소 제거. segment_character_limit으로 통합됨.
+        # ttk.Label(chunk_worker_frame, text="청크 크기:").pack(side="left", padx=(0,5))
+        # self.chunk_size_entry = ttk.Entry(chunk_worker_frame, width=10)
+        # self.chunk_size_entry.pack(side="left", padx=(0,15))
         
         ttk.Label(chunk_worker_frame, text="최대 작업자 수:").pack(side="left", padx=(10,5))
         self.max_workers_entry = ttk.Entry(chunk_worker_frame, width=5)
@@ -987,7 +988,8 @@ class BatchTranslatorGUI:
             "model_name": self.model_name_combobox.get().strip(), 
             "temperature": self.temperature_scale.get(),
             "top_p": self.top_p_scale.get(),
-            "chunk_size": int(self.chunk_size_entry.get() or "6000"), 
+            # "chunk_size" is replaced by "segment_character_limit" from config.
+            # BTG GUI doesn't set this directly; it's read from config by AppService.
             "max_workers": max_workers_val, 
             "requests_per_minute": rpm_val,
             # "prompts"는 universal_translation_prompt로 대체되었으며, BTG GUI에서 직접 편집하지 않음.
@@ -1366,7 +1368,8 @@ class BatchTranslatorGUI:
         try:
             # 파일 크기 기반 추정
             file_size = Path(input_file).stat().st_size
-            chunk_size = int(self.chunk_size_entry.get() or "6000")
+            # chunk_size_entry is removed. Use segment_character_limit from app_service.config
+            chunk_size = self.app_service.config.get("segment_character_limit", 6000) if self.app_service else 6000
             estimated_chunks = file_size // chunk_size
             
             sample_ratio = self.sample_ratio_scale.get() / 100.0

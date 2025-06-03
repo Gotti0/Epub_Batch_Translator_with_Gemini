@@ -415,12 +415,12 @@ class EbtgGui:
 
         # EBTG 자체 설정 (예: XHTML 분할 크기)
         ebtg_specific_frame = ttk.LabelFrame(settings_frame, text="EBTG 처리 설정", padding="10")
-        ebtg_specific_frame.pack(fill="x", padx=5, pady=5)
-        ttk.Label(ebtg_specific_frame, text="XHTML 세그먼트 목표 문자 수:").grid(row=0, column=0, padx=5, pady=5, sticky="w") # 레이블 변경
-        self.ebtg_xhtml_segment_target_chars_entry = ttk.Entry(ebtg_specific_frame, width=10) # 변수명 변경
-        Tooltip(self.ebtg_xhtml_segment_target_chars_entry, "하나의 XHTML 파일을 여러 조각으로 나누어 번역할 때, 각 조각의 목표 글자 수입니다.\n0 또는 음수이면 나누지 않습니다. (기본값: 4000)")
-        self.ebtg_xhtml_segment_target_chars_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        self.ebtg_xhtml_segment_target_chars_entry.insert(0, "4000") # 기본값 변경
+        ebtg_specific_frame.pack(fill="x", padx=5, pady=5) # type: ignore
+        ttk.Label(ebtg_specific_frame, text="세그먼트 목표 문자 수:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.ebtg_segment_char_limit_entry = ttk.Entry(ebtg_specific_frame, width=10)
+        Tooltip(self.ebtg_segment_char_limit_entry, "XHTML 콘텐츠 아이템, 일반 텍스트 청크 번역 시 각 세그먼트/청크의 목표 글자 수입니다.\n0 또는 음수이면 나누지 않습니다. (기본값: 4000)")
+        self.ebtg_segment_char_limit_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.ebtg_segment_char_limit_entry.insert(0, "4000")
 
         # 언어 설정 (BTG Module)
         language_settings_frame = ttk.LabelFrame(settings_frame, text="언어 설정 (BTG Module)", padding="10")
@@ -728,11 +728,11 @@ class EbtgGui:
         # EBTG specific settings
         config_data["target_language"] = self.ebtg_app_service.config.get("target_language", "ko") # Keep existing or default
         config_data["universal_translation_prompt"] = self.universal_translation_prompt_text.get("1.0", tk.END).strip()
-        try: # 새 파라미터 읽기
-            config_data["xhtml_segment_target_chars"] = int(self.ebtg_xhtml_segment_target_chars_entry.get() or "4000")
+        try:
+            config_data["segment_character_limit"] = int(self.ebtg_segment_char_limit_entry.get() or "4000")
         except ValueError:
-            config_data["xhtml_segment_target_chars"] = 4000 # 기본값
-            messagebox.showwarning("입력 오류", "EBTG XHTML 세그먼트 목표 문자 수는 숫자여야 합니다. 기본값(4000)으로 설정됩니다.")
+            config_data["segment_character_limit"] = 4000 # 기본값
+            messagebox.showwarning("입력 오류", "세그먼트 목표 문자 수는 숫자여야 합니다. 기본값(4000)으로 설정됩니다.")
         
         # BTG module related settings (to be stored in ebtg_config.json, under a sub-key or flattened)
         # The universal_translation_prompt from EBTG will also be used by BTG if EBTG calls BTG.
@@ -760,8 +760,9 @@ class EbtgGui:
         btg_config["temperature"] = self.temperature_scale.get()
         btg_config["top_p"] = self.top_p_scale.get()
         
-        try: btg_config["chunk_size"] = int(self.btg_chunk_size_entry.get() or "6000")
-        except ValueError: btg_config["chunk_size"] = 6000
+        # btg_chunk_size_entry is removed, BTG will use segment_character_limit from EBTG's config
+        # If BTG runs standalone, it uses its own default for segment_character_limit.
+        # btg_config["segment_character_limit"] will be set by EBTG config.
         try: btg_config["max_workers"] = int(self.btg_max_workers_entry.get() or "4")
         except ValueError: btg_config["max_workers"] = 4
         try: btg_config["requests_per_minute"] = int(self.btg_rpm_entry.get() or "60")
@@ -826,9 +827,9 @@ class EbtgGui:
         
         # EBTG specific settings
         self.universal_translation_prompt_text.delete('1.0', tk.END)
-        self.universal_translation_prompt_text.insert('1.0', config.get("universal_translation_prompt", ""))
-        self.ebtg_xhtml_segment_target_chars_entry.delete(0, tk.END) # 새 파라미터 UI 업데이트
-        self.ebtg_xhtml_segment_target_chars_entry.insert(0, str(config.get("xhtml_segment_target_chars", 4000)))
+        self.universal_translation_prompt_text.insert('1.0', config.get("universal_translation_prompt", self.ebtg_app_service.config_manager.get_default_config()["universal_translation_prompt"]))
+        self.ebtg_segment_char_limit_entry.delete(0, tk.END)
+        self.ebtg_segment_char_limit_entry.insert(0, str(config.get("segment_character_limit", 4000)))
 
         # BTG module related settings
         self.api_keys_text.delete('1.0', tk.END)
@@ -849,8 +850,8 @@ class EbtgGui:
         except ValueError: self.top_p_scale.set(0.9)
         self.top_p_label.config(text=f"{self.top_p_scale.get():.2f}")
 
-        self.btg_chunk_size_entry.delete(0, tk.END)
-        self.btg_chunk_size_entry.insert(0, str(config.get("chunk_size", 6000)))
+        # btg_chunk_size_entry is removed from UI. BTG will use segment_character_limit from EBTG config.
+        # No UI element to update for BTG's chunk_size directly in EBTG GUI.
         self.btg_max_workers_entry.delete(0, tk.END)
         self.btg_max_workers_entry.insert(0, str(config.get("max_workers", 4)))
         self.btg_rpm_entry.delete(0, tk.END)
