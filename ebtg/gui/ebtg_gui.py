@@ -316,10 +316,10 @@ class EbtgGui:
         # EBTG 자체 설정 (예: XHTML 분할 크기)
         ebtg_specific_frame = ttk.LabelFrame(settings_frame, text="EBTG 처리 설정", padding="10")
         ebtg_specific_frame.pack(fill="x", padx=5, pady=5)
-        ttk.Label(ebtg_specific_frame, text="XHTML 분할 최대 아이템 수:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.ebtg_segment_max_items_entry = ttk.Entry(ebtg_specific_frame, width=10)
-        self.ebtg_segment_max_items_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        self.ebtg_segment_max_items_entry.insert(0, "0") # Default: no segmentation by item count
+        ttk.Label(ebtg_specific_frame, text="XHTML 세그먼트 목표 문자 수:").grid(row=0, column=0, padx=5, pady=5, sticky="w") # 레이블 변경
+        self.ebtg_xhtml_segment_target_chars_entry = ttk.Entry(ebtg_specific_frame, width=10) # 변수명 변경
+        self.ebtg_xhtml_segment_target_chars_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.ebtg_xhtml_segment_target_chars_entry.insert(0, "15000") # 기본값 변경
 
         # 언어 설정 (BTG Module)
         language_settings_frame = ttk.LabelFrame(settings_frame, text="언어 설정 (BTG Module)", padding="10")
@@ -612,11 +612,11 @@ class EbtgGui:
         config_data["target_language"] = self.ebtg_app_service.config.get("target_language", "ko") # Keep existing or default
         config_data["prompt_instructions_for_xhtml_generation"] = self.ebtg_xhtml_prompt_text.get("1.0", tk.END).strip()
         config_data["prompt_instructions_for_xhtml_fragment_generation"] = self.ebtg_xhtml_fragment_prompt_text.get("1.0", tk.END).strip()
-        try:
-            config_data["content_segmentation_max_items"] = int(self.ebtg_segment_max_items_entry.get() or "0")
+        try: # 새 파라미터 읽기
+            config_data["xhtml_segment_target_chars"] = int(self.ebtg_xhtml_segment_target_chars_entry.get() or "15000")
         except ValueError:
-            config_data["content_segmentation_max_items"] = 0
-            messagebox.showwarning("입력 오류", "EBTG XHTML 분할 최대 아이템 수는 숫자여야 합니다. 기본값(0)으로 설정됩니다.") # 이미 한국어
+            config_data["xhtml_segment_target_chars"] = 15000 # 기본값
+            messagebox.showwarning("입력 오류", "EBTG XHTML 세그먼트 목표 문자 수는 숫자여야 합니다. 기본값(15000)으로 설정됩니다.")
         
         # BTG module related settings (to be stored in ebtg_config.json, under a sub-key or flattened)
         # For simplicity, we'll flatten them for now, but a sub-key like "btg_settings" might be cleaner.
@@ -716,15 +716,15 @@ class EbtgGui:
         self.ebtg_xhtml_prompt_text.insert('1.0', config.get("prompt_instructions_for_xhtml_generation", ""))
         self.ebtg_xhtml_fragment_prompt_text.delete('1.0', tk.END)
         self.ebtg_xhtml_fragment_prompt_text.insert('1.0', config.get("prompt_instructions_for_xhtml_fragment_generation", ""))
-        self.ebtg_segment_max_items_entry.delete(0, tk.END)
-        self.ebtg_segment_max_items_entry.insert(0, str(config.get("content_segmentation_max_items", 0)))
+        self.ebtg_xhtml_segment_target_chars_entry.delete(0, tk.END) # 새 파라미터 UI 업데이트
+        self.ebtg_xhtml_segment_target_chars_entry.insert(0, str(config.get("xhtml_segment_target_chars", 15000)))
 
         # BTG module related settings
         self.api_keys_text.delete('1.0', tk.END)
         self.api_keys_text.insert('1.0', "\n".join(config.get("api_keys", [])))
         self.use_vertex_ai_var.set(config.get("use_vertex_ai", False))
-        self.service_account_file_entry.delete(0, tk.END)
-        self.service_account_file_entry.insert(0, config.get("service_account_file_path", ""))
+        self.service_account_file_entry.delete(0, tk.END) 
+        self.service_account_file_entry.insert(0, config.get("service_account_file_path") or "") # Ensure string
         self.gcp_project_entry.delete(0, tk.END)
         self.gcp_project_entry.insert(0, config.get("gcp_project", ""))
         self.gcp_location_entry.delete(0, tk.END)
