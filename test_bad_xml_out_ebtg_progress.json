@@ -1,8 +1,0 @@
-{
-    "test_bad_xml.epub": {
-        "bad.xhtml": {
-            "status": "failed_validation",
-            "error": "Generated content is not well-formed XML."
-        }
-    }
-}

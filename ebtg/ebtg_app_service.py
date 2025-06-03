@@ -19,7 +19,7 @@ from .epub_validation_service import EpubValidationService # Import EpubValidati
 from .quality_monitor_service import QualityMonitorService # Import QualityMonitorService
 from .ebtg_exceptions import EbtgProcessingError, XhtmlExtractionError, ApiXhtmlGenerationError
 from .ebtg_dtos import EpubProcessingProgressDTO, ExtractedContentElement, TextBlock, ImageInfo # DTO 추가
-from .config_manager import EbtgConfigManager # Assuming a config manager for EBTG
+from .config_manager import EbtgConfigManager
 
 # Assuming BTG module is accessible
 from btg_module.app_service import AppService as BtgAppService
@@ -27,6 +27,7 @@ from btg_module.exceptions import BtgServiceException
 from btg_module.dtos import LorebookEntryDTO # For EBTG-managed lorebook
 from btg_module.file_handler import read_json_file as btg_read_json_file # To avoid name clash if ebtg had one
 from collections import defaultdict
+from .ebtg_dtos import TranslateTextChunksRequestDto, TranslateTextChunksResponseDto
 
 @dataclass
 class SegmentProcessingTask:
@@ -175,6 +176,34 @@ class EbtgAppService:
             logger.info("EBTG Lorebook: No relevant entries found for current content.")
             return "로어북 컨텍스트 없음 (EBTG 제공 - 관련 항목 없음)"
 
+    def _get_relevant_lorebook_context_for_extracted_elements(self, elements: List[ExtractedContentElement]) -> str:
+        """Filters EBTG lorebook entries based on ExtractedContentElement list and formats them."""
+        if not self.ebtg_lorebook_entries or not elements:
+            return "로어북 컨텍스트 없음 (EBTG 제공 - 로어북 비어있거나 콘텐츠 없음)"
+
+        relevant_entries: List[LorebookEntryDTO] = []
+        combined_text_for_matching = ""
+        for element in elements:
+            if isinstance(element, TextBlock):
+                combined_text_for_matching += element.text_content.lower() + " "
+            elif isinstance(element, ImageInfo) and element.original_alt:
+                combined_text_for_matching += element.original_alt.lower() + " "
+        
+        if not combined_text_for_matching.strip():
+            return "로어북 컨텍스트 없음 (EBTG 제공 - 콘텐츠 내 텍스트 없음)"
+
+        for entry in self.ebtg_lorebook_entries:
+            # Using simple keyword matching. More sophisticated matching could be implemented.
+            if entry.keyword.lower() in combined_text_for_matching:
+                relevant_entries.append(entry)
+        
+        if relevant_entries:
+            logger.info(f"EBTG Lorebook: Found {len(relevant_entries)} relevant entries for current extracted elements. Keywords: {[e.keyword for e in relevant_entries[:5]]}...")
+            return self._format_ebtg_lorebook_for_prompt(relevant_entries)
+        else:
+            logger.info("EBTG Lorebook: No relevant entries found for current extracted elements.")
+            return "로어북 컨텍스트 없음 (EBTG 제공 - 관련 항목 없음)"
+
     def _wrap_body_fragments_in_full_xhtml(self, body_fragments_concatenated: str, title: str, lang: str) -> str:
         """Wraps concatenated body fragments into a complete XHTML document."""
         # Ensure XML declaration is on the first line if body_content might have leading whitespace
@@ -250,13 +279,13 @@ class EbtgAppService:
             body_content_parts: List[str] = []
             if content_items:
                 for item in content_items:
-                    if item.get("type") == "text":
-                        text_data = item.get("data", "")
+                    # content_items here is List[ExtractedContentElement]
+                    if isinstance(item, TextBlock):
+                        text_data = item.text_content
                         if text_data.strip(): # Add non-empty text
                             body_content_parts.append(f"<p>{text_data.strip()}</p>")
-            
             if not body_content_parts: # If no text items were extracted, use a placeholder
-                logger.warning(f"No text content found for fallback in {title}. Using placeholder.")
+                logger.warning(f"No text content found from TextBlocks for fallback in {title}. Using placeholder.")
                 body_content_parts.append("<p>[Content could not be processed or was empty]</p>")
 
             fallback_body_content = "\n".join(body_content_parts)
@@ -267,6 +296,48 @@ class EbtgAppService:
             return self._wrap_body_fragments_in_full_xhtml(
                 "<p>[Error generating fallback content]</p>", f"Fallback Error - {title}", lang
             )
+
+    def _create_text_chunks(self, texts: List[str], max_chars_per_chunk: int, join_separator="\n\n") -> List[str]:
+        """
+        Combines and splits a list of text strings into chunks, each not exceeding max_chars_per_chunk.
+        Args:
+            texts: A list of text strings.
+            max_chars_per_chunk: The maximum character length for each chunk.
+            join_separator: Separator used when joining multiple small texts into one chunk.
+        Returns:
+            A list of text chunks.
+        """
+        chunks: List[str] = []
+        current_chunk_texts: List[str] = []
+        current_chunk_chars = 0
+
+        if max_chars_per_chunk <= 0: # No chunking by char length
+            combined_text = join_separator.join(texts)
+            if combined_text: chunks.append(combined_text)
+            return chunks
+
+        for text_item in texts:
+            if not text_item.strip():
+                continue
+
+            if len(text_item) > max_chars_per_chunk:
+                if current_chunk_texts: # Finalize current chunk
+                    chunks.append(join_separator.join(current_chunk_texts))
+                    current_chunk_texts = []
+                    current_chunk_chars = 0
+                for i in range(0, len(text_item), max_chars_per_chunk): # Split large item
+                    chunks.append(text_item[i:i + max_chars_per_chunk])
+            elif current_chunk_chars + len(text_item) + (len(join_separator) if current_chunk_texts else 0) > max_chars_per_chunk:
+                chunks.append(join_separator.join(current_chunk_texts))
+                current_chunk_texts = [text_item]
+                current_chunk_chars = len(text_item)
+            else:
+                current_chunk_texts.append(text_item)
+                current_chunk_chars += len(text_item) + (len(join_separator) if len(current_chunk_texts) > 1 else 0)
+        
+        if current_chunk_texts: # Add any remaining chunk
+            chunks.append(join_separator.join(current_chunk_texts))
+        return chunks
 
     def _process_single_segment_task_wrapper(self, task: SegmentProcessingTask) -> Tuple[Any, int, Optional[str], Optional[Exception]]:
         """
@@ -511,24 +582,12 @@ class EbtgAppService:
                         self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "skipped_empty_content")
                         continue
 
-                    # Segment the content items
-                    item_segments = self.content_segmenter.segment_content_items(
-                        content_items, item_filename, xhtml_segment_target_chars # Use new parameter
-                    )
+                    # --- Start: Phase 3 - Text Extraction, Chunking, and BTG Request Preparation ---
+                    # The old segmentation logic (ContentSegmentationService, SegmentProcessingTask, _process_single_segment_task_wrapper)
+                    # was for the previous architecture where EBTG sent structured items to BTG for full XHTML generation.
+                    # This is now replaced by extracting plain text, chunking it, and sending it for fragment translation.
 
-                    final_xhtml_parts = []
-                    segment_has_errors = False
-
-                    if not item_segments: # Should not happen if content_items was not empty
-                        logger.warning(f"Content segmentation (old logic) returned no segments for {item_filename}. This part needs update for new architecture. Keeping original for now.")
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "skipped_no_segments")
-                        continue
-
-                    # --- Start: New logic for Phase 2 (Text and Alt-Text Extraction) ---
-                    texts_for_translation_for_item: List[str] = []
-                    # Map to link an original alt text's unique ID to its ImageInfo object and its index in texts_for_translation_for_item
-                    # Key: unique_alt_text_id (e.g., "item_filename_alt_0"), Value: (ImageInfo_object, index_in_texts_for_translation_for_item)
-                    alt_text_details_map: Dict[str, Tuple[ImageInfo, int]] = {}
+                    logger.info(f"[{item_filename}] Starting Phase 3: Text extraction and preparation for BTG.")
                     alt_text_id_counter = 0
 
                     for element_idx, element_obj in enumerate(extracted_elements):
@@ -539,90 +598,137 @@ class EbtgAppService:
                             # ImageInfo object itself is preserved in extracted_elements.
                             # If it has alt text, add that to the list for translation.
                             if element_obj.original_alt and element_obj.original_alt.strip():
-                                texts_for_translation_for_item.append(element_obj.original_alt)
                                 # Create a unique ID for this alt text to map it back after translation.
                                 unique_alt_id = f"{Path(item_filename).stem}_alt_{alt_text_id_counter}"
-                                alt_text_details_map[unique_alt_id] = (element_obj, len(texts_for_translation_for_item) - 1)
+                                # Store the ImageInfo object and its original alt text for later reassembly
+                                alt_text_details_map[unique_alt_id] = (element_obj, element_obj.original_alt)
                                 alt_text_id_counter += 1
-                    
+                                texts_for_translation_for_item.append(element_obj.original_alt) # Add alt text to translation list
+
                     logger.info(f"For {item_filename}: Extracted {len(texts_for_translation_for_item)} text/alt-text strings for translation.")
-                    logger.info(f"For {item_filename}: Found {len(alt_text_details_map)} alt texts to translate.")
                     logger.debug(f"For {item_filename}: texts_for_translation_for_item (first 3): {texts_for_translation_for_item[:3]}")
                     logger.debug(f"For {item_filename}: alt_text_details_map (first 3 items): {list(alt_text_details_map.items())[:3]}")
 
-                    # --- End: New logic for Phase 2 ---
-
-                    # The following block is the OLD logic for segmenting and processing based on List[Dict[str, Any]]
-                    # This will need to be replaced by logic that handles `texts_for_translation_for_item`
-                    # and then reassembles using `extracted_elements` and `alt_text_details_map`.
-                    # For now, we'll comment it out and use fallback/original content.
-                    
-                    # <<<< OLD LOGIC BLOCK START >>>>
-                    # # Prepare tasks for the ThreadPoolExecutor
-                    # tasks_for_item_segments: List[SegmentProcessingTask] = []
-                    # for i, segment_items_data in enumerate(item_segments): # item_segments was from old content_items
-                    #     ebtg_lorebook_context_str = self._get_relevant_lorebook_context_for_items(segment_items_data)
-                    #     tasks_for_item_segments.append(
-                    #         SegmentProcessingTask(
-                    #             xhtml_item_id=item_id,
-                    #             xhtml_item_filename=item_filename,
-                    #             original_xhtml_content_str=original_xhtml_content_str, 
-                    #             segment_items_data=segment_items_data,
-                    #             segment_index=i,
-                    #             total_segments_for_item=len(item_segments),
-                    #             target_language=target_language,
-                    #             prompt_template_for_item=universal_prompt_template, 
-                    #             ebtg_lorebook_context_for_segment=ebtg_lorebook_context_str
-                    #         )
-                    #     )
-                    # 
-                    # # Use ThreadPoolExecutor to process segments in parallel
-                    # num_workers = self.btg_app_service.config.get("max_workers", 4)
-                    # logger.info(f"Processing {len(tasks_for_item_segments)} segments for {item_filename} in parallel with {num_workers} workers.")
-                    # segment_results_map: Dict[int, Tuple[Optional[str], Optional[Exception]]] = {}
-                    # with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                    #     future_to_task_map = {
-                    #         executor.submit(self._process_single_segment_task_wrapper, task): task
-                    #         for task in tasks_for_item_segments
-                    #     }
-                    #     for future in as_completed(future_to_task_map):
-                    #         task_item_id, task_segment_index, generated_xhtml, error = future.result()
-                    #         segment_results_map[task_segment_index] = (generated_xhtml, error)
-                    #         if error:
-                    #             logger.error(f"Error processing segment {task_segment_index} for {item_filename}: {error}")
-                    #             segment_has_errors = True 
-                    # 
-                    # if segment_has_errors:
-                    #     logger.error(f"One or more segments failed for {item_filename}. Using fallback content for the entire item.")
-                    #     # ... (fallback logic) ...
-                    #     continue 
-                    # 
-                    # # ... (rest of the old segment assembly and validation logic) ...
-                    # <<<< OLD LOGIC BLOCK END >>>>
-
-                    # Placeholder for Phase 3, 4, 5:
-                    # 1. Send `texts_for_translation_for_item` to BTG for translation.
-                    #    This will return a list of translated strings (body texts and alt texts).
-                    # 2. Reassemble the XHTML:
-                    #    - Iterate through `extracted_elements`.
-                    #    - If TextBlock, use the corresponding translated text.
-                    #    - If ImageInfo, use its original `src`, and find its translated alt text using `alt_text_details_map`.
-                    #    - Construct the new XHTML string.
-                    # For now, as this logic is not yet implemented, we'll use fallback or original.
-                    logger.warning(f"Phase 3-5 (translation of extracted texts and reassembly) not yet implemented for {item_filename}. Using fallback content.")
-                    if texts_for_translation_for_item: # If there was anything to translate
-                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
-                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
-                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "pending_reassembly_fallback", "New architecture text extraction complete, reassembly pending.")
-                        files_with_errors += 1
-                    else: # No text or alt-text found, keep original
-                        logger.info(f"No translatable text found in {item_filename}. Keeping original content.")
+                    if not texts_for_translation_for_item:
+                        logger.info(f"[{item_filename}] No text or alt-text found for translation. Keeping original content.")
                         self.epub_processor.update_xhtml_content(item_id, original_xhtml_content_str.encode('utf-8'))
                         self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "kept_original_no_translatable_text")
-                        generated_xhtml_for_item_successfully = True # Considered "successful" as it's intentionally kept.
+                        generated_xhtml_for_item_successfully = True # Considered "successful"
+                        continue
 
-                    # If the above placeholder logic results in success (e.g. keeping original)
-                    # generated_xhtml_for_item_successfully = True 
+                    # Chunk the texts
+                    text_chunk_target_chars = self.config.get("text_chunk_target_chars", 3000)
+                    text_chunks_for_btg = self._create_text_chunks(texts_for_translation_for_item, text_chunk_target_chars)
+                    logger.info(f"[{item_filename}] Created {len(text_chunks_for_btg)} text chunks for BTG from {len(texts_for_translation_for_item)} original text items.")
+
+                    if not text_chunks_for_btg: # Should not happen if texts_for_translation_for_item was not empty
+                        logger.warning(f"[{item_filename}] Text chunking resulted in zero chunks. Keeping original content.")
+                        self.epub_processor.update_xhtml_content(item_id, original_xhtml_content_str.encode('utf-8'))
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "kept_original_empty_chunks")
+                        generated_xhtml_for_item_successfully = True
+                        continue
+
+                    # Prepare prompt and lorebook context
+                    # The prompt template from config will have {target_language}, {ebtg_lorebook_context}, and {{slot}}
+                    prompt_template_for_fragments = self.config.get("text_fragment_prompt_template")
+                    ebtg_lorebook_context_for_item = self._get_relevant_lorebook_context_for_extracted_elements(extracted_elements)
+
+                    # Create request DTO for BtgIntegrationService
+                    translation_request_dto = TranslateTextChunksRequestDto(
+                        text_chunks=text_chunks_for_btg,
+                        target_language=target_language,
+                        prompt_template_for_fragment_generation=prompt_template_for_fragments,
+                        ebtg_lorebook_context=ebtg_lorebook_context_for_item
+                    )
+
+                    logger.info(f"[{item_filename}] Sending {len(text_chunks_for_btg)} text chunks to BtgIntegrationService for translation and fragment generation.")
+                    
+                    # Call BtgIntegrationService (This method needs to be implemented in BtgIntegrationService)
+                    # It's expected to use BtgAppService to call the LLM for each chunk.
+                    try:
+                        # Assuming BtgIntegrationService.translate_text_chunks returns TranslateTextChunksResponseDto
+                        # This method is responsible for iterating through chunks, calling BTG's translation service,
+                        # and collecting results.
+                        response_dto: TranslateTextChunksResponseDto = self.btg_integration.translate_text_chunks(translation_request_dto)
+                        
+                        if response_dto.errors or len(response_dto.translated_xhtml_fragments) != len(text_chunks_for_btg):
+                            logger.error(f"[{item_filename}] Errors encountered during text chunk translation by BTG, or mismatch in fragment count. Errors: {response_dto.errors}. Fragments received: {len(response_dto.translated_xhtml_fragments)}, expected: {len(text_chunks_for_btg)}. Using fallback.")
+                            # Fallback for the entire XHTML item if any chunk fails or counts mismatch
+                            raise EbtgProcessingError("BTG failed to translate one or more text chunks.")
+
+                        # --- Phase 5: Reassembly ---
+                        logger.info(f"[{item_filename}] Starting Phase 5: EPUB Reassembly.")
+                        reassembled_xhtml_parts: List[str] = []
+                        translated_fragment_iter = iter(response_dto.translated_xhtml_fragments)
+                        
+                        # Separate translated alt texts from the main body text fragments
+                        # The order in response_dto.translated_xhtml_fragments matches the order in texts_for_translation_for_item
+                        # texts_for_translation_for_item contains body texts first, then alt texts.
+                        
+                        num_body_texts = sum(1 for el in extracted_elements if isinstance(el, TextBlock) and el.text_content.strip())
+                        num_alt_texts = len(alt_text_details_map)
+
+                        translated_body_fragments = [next(translated_fragment_iter) for _ in range(num_body_texts)]
+                        translated_alt_text_fragments = [next(translated_fragment_iter) for _ in range(num_alt_texts)]
+
+                        # Store translated alt texts back into ImageInfo objects
+                        # We need to parse the alt text from the fragment (e.g., <p>Translated Alt</p> -> Translated Alt)
+                        current_alt_text_idx = 0
+                        for unique_alt_id, (image_info_obj, _) in alt_text_details_map.items():
+                            if current_alt_text_idx < len(translated_alt_text_fragments):
+                                alt_fragment = translated_alt_text_fragments[current_alt_text_idx]
+                                try:
+                                    soup_alt = BeautifulSoup(alt_fragment, 'html.parser')
+                                    image_info_obj.translated_alt = soup_alt.get_text().strip()
+                                    logger.debug(f"Stored translated alt '{image_info_obj.translated_alt}' for image src '{image_info_obj.src}'")
+                                except Exception as e_alt_parse:
+                                    logger.warning(f"Failed to parse alt text fragment '{alt_fragment[:50]}...': {e_alt_parse}. Using original alt for {image_info_obj.src}")
+                                    image_info_obj.translated_alt = image_info_obj.original_alt # Fallback to original
+                            else:
+                                logger.warning(f"Mismatch in alt text count for {unique_alt_id}. Using original alt for {image_info_obj.src}")
+                                image_info_obj.translated_alt = image_info_obj.original_alt # Fallback
+                            current_alt_text_idx += 1
+
+                        current_body_fragment_idx = 0
+                        for element in extracted_elements:
+                            if isinstance(element, TextBlock):
+                                if element.text_content.strip(): # Only add fragment if original text was not empty
+                                    if current_body_fragment_idx < len(translated_body_fragments):
+                                        reassembled_xhtml_parts.append(translated_body_fragments[current_body_fragment_idx])
+                                        current_body_fragment_idx += 1
+                                    else:
+                                        logger.warning(f"[{item_filename}] Mismatch: More TextBlocks than translated body fragments. Appending empty string for a TextBlock.")
+                                        # reassembled_xhtml_parts.append("<p>[Missing Translation]</p>") # Or skip
+                            elif isinstance(element, ImageInfo):
+                                final_alt_text = element.translated_alt if element.translated_alt else element.original_alt
+                                # Reconstruct the img tag. For simplicity, we use original_tag_string and replace alt.
+                                # A more robust way would be to parse original_tag_string with BeautifulSoup,
+                                # update alt, and then stringify.
+                                updated_img_tag = re.sub(r'alt=".*?"', f'alt="{final_alt_text}"', element.original_tag_string, flags=re.IGNORECASE)
+                                if f'alt="{final_alt_text}"' not in updated_img_tag: # If alt wasn't present or regex failed
+                                    updated_img_tag = re.sub(r'(<img[^>]*?)(\s*\/?>)', rf'\1 alt="{final_alt_text}"\2', element.original_tag_string)
+                                reassembled_xhtml_parts.append(updated_img_tag)
+
+                        final_xhtml_content_str = "\n".join(reassembled_xhtml_parts)
+                        
+                        # Validate and update EPUB content
+                        is_valid_xhtml, validation_errors = self.quality_monitor.validate_xhtml_structure(final_xhtml_content_str, item_filename)
+                        if not is_valid_xhtml:
+                            logger.error(f"[{item_filename}] Reassembled XHTML is not well-formed: {validation_errors}. Using fallback.")
+                            raise EbtgProcessingError(f"Reassembled XHTML for {item_filename} failed validation.")
+
+                        self.epub_processor.update_xhtml_content(item_id, final_xhtml_content_str.encode('utf-8'))
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, "translated_reassembled_successfully")
+                        generated_xhtml_for_item_successfully = True
+                        logger.info(f"[{item_filename}] Successfully reassembled and updated in EPUB.")
+                        # --- End: Phase 5 ---
+
+                    except (BtgServiceException, EbtgProcessingError) as e_btg_reassembly:
+                        logger.error(f"[{item_filename}] Error during BTG call or reassembly: {e_btg_reassembly}. Using fallback.")
+                        fallback_xhtml = self._create_fallback_xhtml(original_xhtml_content_str, Path(item_filename).stem, target_language)
+                        self.epub_processor.update_xhtml_content(item_id, fallback_xhtml.encode('utf-8'))
+                        self.progress_service.record_xhtml_status(Path(input_epub_path).name, item_filename, f"failed_reassembly_fallback", str(e_btg_reassembly))
+                        files_with_errors += 1
 
                 except (XhtmlExtractionError, ApiXhtmlGenerationError, BtgServiceException, UnicodeDecodeError) as e_proc:
                     logger.error(f"Processing error for {item_filename}: {e_proc}. Using fallback content.")

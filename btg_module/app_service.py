@@ -34,7 +34,8 @@ try:
     from .chunk_service import ChunkService
     from .exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException
     from .dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # DTO 임포트 확인
-    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # 새 DTO 임포트 (Corrected to relative)
+    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO 
+    from ebtg.ebtg_dtos import TranslateTextChunksRequestDto, TranslateTextChunksResponseDto # EBTG DTO 직접 사용 (가이드라인 기반)
 except ImportError:
     # Fallback imports
     from .file_handler import ( # Fallback to relative
@@ -53,7 +54,7 @@ except ImportError:
     from .chunk_service import ChunkService # Fallback to relative
     from .exceptions import BtgServiceException, BtgConfigException, BtgFileHandlerException, BtgApiClientException, BtgTranslationException, BtgBusinessLogicException # Fallback to relative
     from .dtos import TranslationJobProgressDTO, LorebookExtractionProgressDTO # Fallback to relative
-    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO # Fallback to relative
+    from .dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO 
 
 logger = setup_logger(__name__)
 
@@ -984,6 +985,62 @@ The response should be a single JSON object containing the key "translated_xhtml
             logger.info(f"Successfully generated and batched XHTML for {request_dto.id_prefix} from {len(all_xhtml_fragments)} original fragments, "
                         f"resulting in {len(valid_fragments)} non-empty fragments being combined.")
             return XhtmlGenerationResponseDTO(id_prefix=request_dto.id_prefix, generated_xhtml_string=complete_xhtml)
+
+    def translate_text_chunks_to_xhtml_fragments_endpoint(
+        self,
+        request_dto: TranslateTextChunksRequestDto
+    ) -> TranslateTextChunksResponseDto:
+        """
+        텍스트 청크 목록을 번역하고 각각을 XHTML 조각으로 변환합니다.
+        EBTG 모듈로부터의 요청을 처리하기 위한 엔드포인트입니다.
+
+        Args:
+            request_dto: 번역할 텍스트 청크, 대상 언어, 프롬프트 템플릿 등을 포함하는 DTO.
+
+        Returns:
+            번역된 XHTML 조각 목록과 오류 정보를 포함하는 DTO.
+        """
+        logger.info(f"AppService: Received request to translate {len(request_dto.text_chunks)} text chunks to XHTML fragments for language '{request_dto.target_language}'.")
+
+        if not self.translation_service:
+            logger.error("TranslationService is not initialized. Cannot translate text chunks.")
+            return TranslateTextChunksResponseDto(
+                translated_xhtml_fragments=[],
+                errors=[{"chunk_index": -1, "error_message": "TranslationService not initialized."}]
+            )
+
+        translated_fragments: List[str] = []
+        errors_list: List[Dict[str, Any]] = []
+
+        # EBTG에서 전달된 프롬프트 템플릿에 target_language와 ebtg_lorebook_context를 채웁니다.
+        # {{slot}}은 TranslationService 내부에서 각 청크로 대체됩니다.
+        base_prompt_for_fragments = request_dto.prompt_template_for_fragment_generation.replace(
+            "{target_language}", request_dto.target_language
+        ).replace(
+            "{ebtg_lorebook_context}", request_dto.ebtg_lorebook_context or "제공된 로어북 컨텍스트 없음"
+        )
+
+        for index, text_chunk in enumerate(request_dto.text_chunks):
+            try:
+                logger.debug(f"Translating chunk {index + 1}/{len(request_dto.text_chunks)} to XHTML fragment.")
+                # self.translation_service.translate_text_to_xhtml_fragment는 Phase 4에서 구현될 예정입니다.
+                # 이 메서드는 base_prompt_for_fragments의 {{slot}}을 text_chunk로 대체하고 Gemini API를 호출합니다.
+                fragment: str = self.translation_service.translate_text_to_xhtml_fragment(
+                    text_chunk=text_chunk,
+                    target_language=request_dto.target_language, # TranslationService에서 필요시 사용
+                    prompt_template_with_context_and_slot=base_prompt_for_fragments # {{slot}}이 아직 남아있는 프롬프트
+                )
+                translated_fragments.append(fragment)
+                logger.debug(f"Successfully translated chunk {index + 1} to fragment: '{fragment[:100]}...'")
+
+            except (BtgApiClientException, BtgTranslationException, BtgServiceException) as e:
+                logger.error(f"Error translating text chunk {index} to XHTML fragment: {e}", exc_info=True)
+                errors_list.append({"chunk_index": index, "original_chunk_preview": text_chunk[:100], "error_message": str(e)})
+            except Exception as e_unexpected: # 예상치 못한 다른 예외 처리
+                logger.error(f"Unexpected error translating text chunk {index} to XHTML fragment: {e_unexpected}", exc_info=True)
+                errors_list.append({"chunk_index": index, "original_chunk_preview": text_chunk[:100], "error_message": f"Unexpected error: {str(e_unexpected)}"})
+
+        return TranslateTextChunksResponseDto(translated_xhtml_fragments=translated_fragments, errors=errors_list if errors_list else None)
 
 if __name__ == '__main__':
     import logging

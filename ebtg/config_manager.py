@@ -22,7 +22,13 @@ class EbtgConfigManager:
             "perform_content_omission_check": True, # New option for content omission check
             "ebtg_lorebook_json_path": None, # Path for EBTG's primary lorebook
             "ebtg_max_lorebook_entries_injection": 5, # Max EBTG lorebook entries to inject into prompt
-            "ebtg_max_lorebook_chars_injection": 1000  # Max EBTG lorebook chars to inject into prompt
+            "ebtg_max_lorebook_chars_injection": 1000,  # Max EBTG lorebook chars to inject into prompt
+            "text_chunk_target_chars": 3000, # Target character length for plain text chunks sent to BTG for fragment translation.
+            "text_fragment_prompt_template": ( # Prompt template for BTG to translate a text chunk and wrap it in a simple XHTML fragment (e.g., <p>)
+                "Please translate the following text into {target_language}. "
+                "Your response should be ONLY the translated text, wrapped in a single paragraph tag (e.g., <p>Translated text.</p>). "
+                "Ensure no other HTML structure (like html, head, body tags) is included.\n\n"
+                "# Lorebook Context (if provided, consider for translation):\n{ebtg_lorebook_context}\n\n# Text to Translate:\n{{slot}}")
      }
 
     def load_config(self) -> Dict[str, Any]:

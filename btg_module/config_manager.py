@@ -93,7 +93,14 @@ class ConfigManager:
             "enable_dynamic_lorebook_injection": False, # EBTG에서는 이 설정을 직접 사용하지 않고, TranslationService가 자체 로어북을 사용.
             "xhtml_generation_max_chars_per_batch": 100000, # XHTML 생성 시 API 요청당 최대 프롬프트 문자 수 (근사치)
             "max_lorebook_entries_per_chunk_injection": 3,
-            "max_lorebook_chars_per_chunk_injection": 500
+            "max_lorebook_chars_per_chunk_injection": 500,
+            "text_to_xhtml_fragment_prompt_template": ( # BTG 모듈 단독 실행 또는 테스트 시 사용할 기본 프롬프트
+                "Please translate the following text into {target_language}. "
+                "Your response should be ONLY the translated text, wrapped in a single paragraph tag (e.g., <p>Translated text.</p>). "
+                "Ensure no other HTML structure (like html, head, body tags) is included.\n\n"
+                "# Lorebook Context (if provided, consider for translation):\n{lorebook_context}\n\n" # BTG 자체 로어북 컨텍스트용 플레이스홀더
+                "# Text to Translate:\n{{slot}}"
+            )
         }
 
     def load_config(self, use_default_if_missing: bool = True) -> Dict[str, Any]:

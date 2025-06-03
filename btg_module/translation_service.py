@@ -294,6 +294,96 @@ class TranslationService:
         final_text = translated_text 
         return final_text.strip()
     
+    def translate_text_to_xhtml_fragment(
+        self,
+        text_chunk: str,
+        target_language: str, # 프롬프트에 이미 포함되어 있을 수 있지만, 명시적으로 받음
+        prompt_template_with_context_and_slot: str # {{slot}} 플레이스홀더를 포함한 전체 프롬프트
+    ) -> str:
+        """
+        주어진 텍스트 청크를 번역하고, 지정된 프롬프트 템플릿을 사용하여
+        번역 결과를 XHTML 조각(예: <p>태그)으로 감싸 반환합니다.
+        Gemini API에 JSON 응답을 요청하고, 스키마를 사용하여 특정 필드를 추출합니다.
+
+        Args:
+            text_chunk: 번역할 텍스트 조각.
+            target_language: 번역 목표 언어 (프롬프트 템플릿 내 {target_language} 대체용,
+                                     BtgIntegrationService에서 이미 처리했을 수 있음).
+            prompt_template_with_context_and_slot: EBTG 로어북 컨텍스트와 대상 언어가 이미 채워져 있고,
+                                                   {{slot}} 플레이스홀더만 남은 프롬프트 템플릿.
+
+        Returns:
+            번역되고 XHTML 조각으로 감싸진 문자열.
+
+        Raises:
+            BtgTranslationException: 번역 또는 XHTML 조각 생성 실패 시.
+            BtgApiClientException: Gemini API 호출 관련 문제 발생 시.
+        """
+        if not self.gemini_client:
+            logger.error("GeminiClient가 초기화되지 않았습니다. 텍스트를 XHTML 조각으로 번역할 수 없습니다.")
+            raise BtgServiceException("GeminiClient is not initialized.")
+
+        if not text_chunk.strip():
+            logger.info("번역할 텍스트 청크가 비어있습니다. 빈 <p></p> 조각을 반환합니다.")
+            return "<p></p>" # 또는 빈 문자열, 정책에 따라 결정
+
+        # {{slot}}을 실제 텍스트 청크로 대체
+        final_prompt_for_api = prompt_template_with_context_and_slot.replace("{{slot}}", text_chunk)
+
+        # Gemini API가 반환할 JSON 스키마 정의
+        response_schema = {
+            "type": "object",
+            "properties": {
+                "translated_xhtml_fragment": {
+                    "type": "string",
+                    "description": "A single XHTML fragment, typically a p tag with translated text."
+                }
+            },
+            "required": ["translated_xhtml_fragment"]
+        }
+
+        generation_config_dict = {
+            "temperature": self.config.get("temperature", 0.5), # XHTML 생성 시에는 약간 낮은 온도 선호 가능
+            "top_p": self.config.get("top_p", 0.95),
+            "response_mime_type": "application/json",
+            "response_schema": response_schema
+        }
+        model_name = self.config.get("model_name", "gemini-2.0-flash")
+
+        logger.info(f"Gemini API에 XHTML 조각 생성 요청. 모델: {model_name}")
+        logger.debug(f"XHTML 조각 생성용 프롬프트 (일부): {final_prompt_for_api[:200]}...")
+
+        try:
+            api_response_dict = self.gemini_client.generate_text(
+                prompt=final_prompt_for_api,
+                model_name=model_name,
+                generation_config_dict=generation_config_dict
+            )
+
+            if not isinstance(api_response_dict, dict):
+                logger.error(f"Gemini API로부터 예상치 못한 응답 유형 수신 (dict 아님): {type(api_response_dict)}. 응답: {str(api_response_dict)[:200]}")
+                raise BtgTranslationException("API로부터 유효한 JSON 객체 응답을 받지 못했습니다.")
+
+            translated_fragment = api_response_dict.get("translated_xhtml_fragment")
+
+            if not isinstance(translated_fragment, str):
+                logger.error(f"API 응답 JSON에 'translated_xhtml_fragment' 필드가 없거나 문자열이 아닙니다. 응답: {api_response_dict}")
+                raise BtgTranslationException("API 응답에서 'translated_xhtml_fragment'를 찾을 수 없거나 형식이 잘못되었습니다.")
+            
+            logger.debug(f"성공적으로 번역된 XHTML 조각 수신: {translated_fragment[:100]}...")
+            return translated_fragment.strip()
+
+        except GeminiContentSafetyException as e_safety:
+            logger.warning(f"XHTML 조각 생성 중 콘텐츠 안전 문제 발생: {e_safety}")
+            raise BtgTranslationException(f"XHTML 조각 생성 중 콘텐츠 안전 문제: {e_safety}", original_exception=e_safety) from e_safety
+        except (GeminiAllApiKeysExhaustedException, GeminiRateLimitException, GeminiInvalidRequestException, GeminiApiException) as e_api_client:
+            logger.error(f"XHTML 조각 생성 중 Gemini API 클라이언트 오류: {e_api_client}")
+            raise BtgApiClientException(f"XHTML 조각 생성 중 API 오류: {e_api_client}", original_exception=e_api_client) from e_api_client
+        except Exception as e_unexpected:
+            logger.error(f"XHTML 조각 생성 중 예상치 못한 오류 발생: {e_unexpected}", exc_info=True)
+            raise BtgTranslationException(f"XHTML 조각 생성 중 알 수 없는 오류: {e_unexpected}", original_exception=e_unexpected) from e_unexpected
+
+    
     def translate_text_with_content_safety_retry(
         self, 
         text_chunk: str, 

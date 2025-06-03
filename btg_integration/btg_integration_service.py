@@ -6,7 +6,8 @@ from btg_module.app_service import AppService as BtgAppService
 from btg_module.dtos import XhtmlGenerationRequestDTO, XhtmlGenerationResponseDTO
 from btg_module.exceptions import BtgServiceException, BtgApiClientException
 
-from ebtg.ebtg_exceptions import ApiXhtmlGenerationError 
+from ebtg.ebtg_exceptions import ApiXhtmlGenerationError, EbtgProcessingError
+from ebtg.ebtg_dtos import TranslateTextChunksRequestDto, TranslateTextChunksResponseDto
 
 logger = logging.getLogger(__name__)
 
@@ -144,3 +145,58 @@ class BtgIntegrationService:
             logger.error(f"Unexpected error in BtgIntegrationService for {id_prefix}: {e}", exc_info=True)
             # Consider if this should also raise ApiXhtmlGenerationError or return None
             return None
+
+    def translate_text_chunks(
+        self,
+        request_dto: TranslateTextChunksRequestDto
+    ) -> TranslateTextChunksResponseDto:
+        """
+        Orchestrates the translation of text chunks into XHTML fragments by calling the BTG module.
+
+        Args:
+            request_dto: Contains text chunks, target language, prompt template, and lorebook context.
+
+        Returns:
+            A DTO containing the list of translated XHTML fragments and any errors.
+        """
+        logger.info(f"BtgIntegrationService: Received request to translate {len(request_dto.text_chunks)} text chunks to XHTML fragments for language '{request_dto.target_language}'.")
+
+        translated_fragments: List[str] = []
+        errors_list: List[Dict[str, Any]] = []
+
+        if not self.btg_app_service.translation_service:
+            logger.error("BTG TranslationService is not initialized. Cannot translate text chunks.")
+            # This is a critical setup error.
+            raise EbtgProcessingError("BTG module's TranslationService not ready for chunk translation.")
+
+        # Prepare the base prompt by filling in language and lorebook context once
+        # The {{slot}} will be filled by the BTG module for each chunk.
+        prompt_template_with_context = request_dto.prompt_template_for_fragment_generation.replace(
+            "{target_language}", request_dto.target_language
+        ).replace(
+            "{ebtg_lorebook_context}", request_dto.ebtg_lorebook_context or "제공된 로어북 컨텍스트 없음"
+        )
+
+        for index, text_chunk in enumerate(request_dto.text_chunks):
+            try:
+                logger.debug(f"Translating chunk {index + 1}/{len(request_dto.text_chunks)} to XHTML fragment.")
+                # This method `translate_text_to_xhtml_fragment` is expected to be implemented in BTG's TranslationService (Phase 4)
+                # It will take the prompt_template_with_context (which includes the {{slot}} placeholder),
+                # replace {{slot}} with text_chunk, call Gemini with the appropriate schema, and return the fragment string.
+                fragment: str = self.btg_app_service.translation_service.translate_text_to_xhtml_fragment(
+                    text_chunk=text_chunk,
+                    target_language=request_dto.target_language, # Passed for consistency, though already in prompt
+                    prompt_template_with_context_and_slot=prompt_template_with_context # This prompt still has {{slot}}
+                )
+                translated_fragments.append(fragment)
+                logger.debug(f"Successfully translated chunk {index + 1} to fragment: '{fragment[:100]}...'")
+
+            except (BtgApiClientException, BtgServiceException) as e:
+                logger.error(f"Error translating text chunk {index} to XHTML fragment: {e}", exc_info=True)
+                errors_list.append({"chunk_index": index, "original_chunk_preview": text_chunk[:100], "error_message": str(e)})
+            except Exception as e_unexpected:
+                logger.error(f"Unexpected error translating text chunk {index} to XHTML fragment: {e_unexpected}", exc_info=True)
+                errors_list.append({"chunk_index": index, "original_chunk_preview": text_chunk[:100], "error_message": f"Unexpected error: {str(e_unexpected)}"})
+
+        logger.info(f"Finished translating text chunks. Got {len(translated_fragments)} fragments, encountered {len(errors_list)} errors.")
+        return TranslateTextChunksResponseDto(translated_xhtml_fragments=translated_fragments, errors=errors_list if errors_list else None)
