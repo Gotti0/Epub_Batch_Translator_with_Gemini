@@ -11,10 +11,9 @@ from typing import Dict, Any, Optional, List, Callable, Tuple # List 추가, Cal
 # Assuming these services and DTOs are defined in the ebtg package
 from .epub_processor_service import EpubProcessorService, EpubXhtmlItem # Assuming EpubXhtmlItem DTO
 from bs4 import BeautifulSoup # For parsing HTML fragments
-from .simplified_html_extractor import SimplifiedHtmlExtractor # type: ignore
-from .ebtg_content_segmentation_service import ContentSegmentationService
 from btg_integration.btg_integration_service import BtgIntegrationService # Corrected import
 from common.progress_persistence_service import ProgressPersistenceService
+from ebtg.simplified_html_extractor import SimplifiedHtmlExtractor
 from .epub_validation_service import EpubValidationService # Import EpubValidationService
 from .quality_monitor_service import QualityMonitorService # Import QualityMonitorService
 from .ebtg_exceptions import EbtgProcessingError, XhtmlExtractionError, ApiXhtmlGenerationError
@@ -33,18 +32,6 @@ from .ebtg_dtos import TranslateTextChunksRequestDto, TranslateTextChunksRespons
 EBTG_MERGE_SEPARATOR = "\n<EBTG_TEXT_SEPARATOR_DO_NOT_TRANSLATE_THIS_TAG/>\n"
 
 
-@dataclass
-class SegmentProcessingTask:
-    xhtml_item_id: Any
-    xhtml_item_filename: str
-    original_xhtml_content_str: str # For fallback
-    segment_items_data: List[Dict[str, Any]]
-    segment_index: int
-    total_segments_for_item: int
-    target_language: str
-    # The base prompt template for the entire item, to be adapted for fragments if necessary.
-    ebtg_lorebook_context_for_segment: str # Added for pre-calculated lorebook context
-    prompt_template_for_item: str
 
 logger = logging.getLogger(__name__) # Or use a setup_logger like in BTG
 
@@ -73,8 +60,6 @@ class EbtgAppService:
         self.btg_app_service = BtgAppService(config_file_path=btg_config_path)
         
         self.epub_processor = EpubProcessorService()
-        self.html_extractor = SimplifiedHtmlExtractor()
-        self.content_segmenter = ContentSegmentationService()
         self.progress_service = ProgressPersistenceService()
         self.epub_validator = EpubValidationService() # Initialize EpubValidationService
         self.quality_monitor = QualityMonitorService() # Initialize QualityMonitorService
@@ -82,6 +67,8 @@ class EbtgAppService:
             btg_app_service=self.btg_app_service, 
             ebtg_config=self.config
         )
+    
+
         
         logger.info("EbtgAppService initialized.")
         logger.info(f"EBTG Target Language: {self.config.get('target_language', 'ko')}")
@@ -281,7 +268,7 @@ class EbtgAppService:
         logger.warning(f"Creating fallback XHTML for: {title}. Structure and images will be lost.")
         try:
             # Use SimplifiedHtmlExtractor to get text items
-            content_items = self.html_extractor.extract_content(original_xhtml_content_str)
+            content_items = self.html_extractor_instance.extract_content(original_xhtml_content_str)
             
             body_content_parts: List[str] = []
             if content_items:
@@ -346,110 +333,7 @@ class EbtgAppService:
             chunks.append(join_separator.join(current_chunk_texts))
         return chunks
 
-    def _process_single_segment_task_wrapper(self, task: SegmentProcessingTask) -> Tuple[Any, int, Optional[str], Optional[Exception]]:
-        """
-        Wrapper function to process a single XHTML segment.
-        This is intended to be run in a ThreadPoolExecutor.
-        Returns (xhtml_item_id, segment_index, generated_xhtml_str_or_None, error_or_None)
-        """
-        segment_id_prefix: str
-        current_prompt_instructions: str
-        is_fragment_request = task.total_segments_for_item > 1
-
-        # Adapt the item's base prompt for fragment or full document processing
-        if is_fragment_request:
-            segment_id_prefix = f"{Path(task.xhtml_item_filename).stem}_part_{task.segment_index + 1}{Path(task.xhtml_item_filename).suffix}"
-            
-            base_universal_prompt = task.prompt_template_for_item.replace('{target_language}', task.target_language)
-            prompt_cleaned_for_fragment = base_universal_prompt
-            prompt_cleaned_for_fragment = re.sub(
-                r"## 번역할 원문.*?({{#if content_items}}.*?{{/if}})",
-                "## 번역할 원문\n(구조화된 콘텐츠 항목은 이 지침 다음에 별도의 JSON 형식으로 제공됩니다. 해당 항목들을 처리해주세요.)",
-                prompt_cleaned_for_fragment, flags=re.DOTALL | re.IGNORECASE
-            )
-            if "{{lorebook_context}}" in prompt_cleaned_for_fragment:
-                # For fragment mode, if we want to inject segment-specific lorebook,
-                # we should NOT replace the placeholder here.
-                # Instead, let the common injection logic below handle it using task.ebtg_lorebook_context_for_segment.
-                # If the intention was to explicitly EXCLUDE lorebook for fragments, the original line was correct.
-                # Assuming per-fragment lorebook is desired:
-                pass # Keep {{lorebook_context}} placeholder for later injection
-            
-
-            fragment_directive = (
-                "\n\nIMPORTANT INSTRUCTION FOR THIS SPECIFIC TASK (FRAGMENT MODE):\n"
-                "You are currently processing a FRAGMENT of a larger document. "
-                "Your output for THIS task must be ONLY the XHTML content for the body of this fragment. "
-                "Do NOT include `<html>`, `<head>`, or `<body>` tags in your response. "
-                "The content items for this fragment will be provided in a JSON block following all instructions."
-            )
-            current_prompt_instructions = prompt_cleaned_for_fragment + fragment_directive
-        else:
-            # This is for a single segment (entire document)
-            # The prompt_template_for_item is already the full universal prompt.
-            # We just need to replace {target_language} and {{lorebook_context}}.
-            # {{lorebook_context}} will be replaced using task.ebtg_lorebook_context_for_segment.
-            # {target_language} will be replaced from task.target_language.
-            # So, task.prompt_template_for_item should be the raw universal template here.
-            # The replacement of {target_language} and {{lorebook_context}} will happen next.
-
-            segment_id_prefix = task.xhtml_item_filename
-            current_prompt_instructions = task.prompt_template_for_item.replace(
-                "{target_language}", task.target_language
-            )
-
-        logger.info(f"Requesting XHTML for {'fragment' if is_fragment_request else 'document'}: {segment_id_prefix} ({len(task.segment_items_data)} items)")
-        
-        # Inject EBTG-managed lorebook context (now using the pre-calculated one from the task)
-        if "{{lorebook_context}}" in current_prompt_instructions:
-            final_prompt_for_btg = current_prompt_instructions.replace("{{lorebook_context}}", task.ebtg_lorebook_context_for_segment)
-            logger.info(f"EBTG: Injected pre-calculated lorebook context for {segment_id_prefix}. Context (first 100 chars): {task.ebtg_lorebook_context_for_segment[:100]}")
-        else:
-            final_prompt_for_btg = current_prompt_instructions
-            logger.warning(f"EBTG: '{{{{lorebook_context}}}}' placeholder not found in prompt for {segment_id_prefix}, EBTG lorebook not injected.")
-        try:
-            generated_segment_xhtml_str = self.btg_integration.generate_xhtml(
-                id_prefix=segment_id_prefix,
-                content_items=task.segment_items_data,
-                target_language=task.target_language,
-                prompt_instructions=final_prompt_for_btg # Use the prompt with lorebook injected
-            )
-
-            if not generated_segment_xhtml_str:
-                logger.error(f"BTG Integration returned no content for segment {segment_id_prefix}.")
-                return task.xhtml_item_id, task.segment_index, None, ApiXhtmlGenerationError(f"No content from BTG for {segment_id_prefix}")
-
-            actual_segment_content_to_use = generated_segment_xhtml_str
-            if is_fragment_request:
-                temp_soup_for_frag_check = BeautifulSoup(generated_segment_xhtml_str, 'html.parser')
-                html_tag_in_frag = temp_soup_for_frag_check.find('html')
-                body_tag_in_frag = temp_soup_for_frag_check.find('body')
-                if html_tag_in_frag and body_tag_in_frag:
-                    logger.debug(f"Segment {segment_id_prefix} (requested as fragment) appears to be a full document. Extracting body content.")
-                    extracted_body_content = "".join(str(c) for c in body_tag_in_frag.contents).strip()
-                    if extracted_body_content:
-                        actual_segment_content_to_use = extracted_body_content
-                    elif generated_segment_xhtml_str.strip():
-                         logger.warning(f"Extracted empty body from full-doc fragment {segment_id_prefix}. Using original fragment string as fallback for this part.")
-            
-            is_valid_segment, validation_errors = self.quality_monitor.validate_xhtml_structure(
-                actual_segment_content_to_use, segment_id_prefix
-            )
-            if not is_valid_segment:
-                logger.error(f"XHTML segment content for {segment_id_prefix} is not well-formed. Errors: {validation_errors}.")
-                # Return the malformed content along with an error for the main thread to decide on fallback for the whole item.
-                return task.xhtml_item_id, task.segment_index, actual_segment_content_to_use, EbtgProcessingError(f"Segment {segment_id_prefix} not well-formed: {validation_errors}")
-
-            logger.info(f"Successfully generated and validated XHTML segment content: {segment_id_prefix}.")
-            return task.xhtml_item_id, task.segment_index, actual_segment_content_to_use, None
-
-        except (ApiXhtmlGenerationError, BtgServiceException, EbtgProcessingError) as e_gen:
-            logger.error(f"Error generating XHTML for segment {segment_id_prefix}: {e_gen}")
-            return task.xhtml_item_id, task.segment_index, None, e_gen
-        except Exception as e_unexpected_segment:
-            logger.error(f"Unexpected error in segment processing {segment_id_prefix}: {e_unexpected_segment}", exc_info=True)
-            return task.xhtml_item_id, task.segment_index, None, e_unexpected_segment
-
+    
     def _translate_single_chunk_task_wrapper(
         self,
         chunk_text: str,
@@ -533,6 +417,9 @@ class EbtgAppService:
             raise EbtgProcessingError(f"Failed to open EPUB {epub_path}: {e}") from e
 
         xhtml_items: List[EpubXhtmlItem] = self.epub_processor.get_xhtml_items()
+        # html_extractor는 BtgIntegrationService 내부 또는 여기서 직접 사용될 수 있습니다.
+        html_extractor_instance = SimplifiedHtmlExtractor() # 인스턴스 생성
+
 
         if not xhtml_items:
             logger.warning(f"No XHTML items found in {epub_path}. Returning empty text.")
@@ -630,6 +517,9 @@ class EbtgAppService:
                 self.btg_app_service.load_app_config() # BTG 서비스 재초기화 (새 설정 적용)
                 logger.info("BTG AppService re-configured for the current translation run based on EBTG's lorebook strategy.")
             # --- BTG AppService 설정 준비 완료 ---
+            # html_extractor는 BtgIntegrationService 내부 또는 여기서 직접 사용될 수 있습니다.
+            html_extractor_instance = SimplifiedHtmlExtractor() # 인스턴스 생성
+
 
             xhtml_items: list[EpubXhtmlItem] = self.epub_processor.get_xhtml_items()
             
@@ -685,7 +575,7 @@ class EbtgAppService:
                     original_xhtml_content_str = xhtml_item.original_content_bytes.decode('utf-8', errors='replace')
                     
                     # Phase 2: Extract ExtractedContentElement list
-                    extracted_elements: List[ExtractedContentElement] = self.html_extractor.extract_content(original_xhtml_content_str)
+                    extracted_elements: List[ExtractedContentElement] = html_extractor_instance.extract_content(original_xhtml_content_str)
 
                     if not extracted_elements:
                         logger.warning(f"No content elements extracted from {item_filename} by SimplifiedHtmlExtractor. Keeping original content.")

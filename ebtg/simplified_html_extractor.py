@@ -4,7 +4,6 @@ from typing import List, Dict, Any, Union # Union 추가
 from bs4 import BeautifulSoup, NavigableString, Tag
 import time # Added for delay
 
-# 새로운 아키텍처를 위한 DTO 임포트
 from .ebtg_dtos import TextBlock, ImageInfo, ExtractedContentElement
 from .ebtg_exceptions import XhtmlExtractionError # 예외 클래스 임포트
 
