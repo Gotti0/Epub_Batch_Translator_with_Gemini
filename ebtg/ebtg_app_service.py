@@ -51,6 +51,7 @@ class EbtgAppService:
         # Use the unified 'lorebook_json_path' for EBTG's specific lorebook mechanism.
         # The GUI controls 'lorebook_json_path'.
         self.ebtg_lorebook_json_path = self.config.get("lorebook_json_path") 
+        self.html_extractor_instance = SimplifiedHtmlExtractor() # Initialize here
         logger.info(f"EBTG-specific lorebook mechanism will use path: {self.ebtg_lorebook_json_path} (from 'lorebook_json_path' config)")
         self.ebtg_max_lorebook_entries_injection = self.config.get("ebtg_max_lorebook_entries_injection", 5)
         self.ebtg_max_lorebook_chars_injection = self.config.get("ebtg_max_lorebook_chars_injection", 1000)
@@ -64,10 +65,10 @@ class EbtgAppService:
         self.epub_validator = EpubValidationService() # Initialize EpubValidationService
         self.quality_monitor = QualityMonitorService() # Initialize QualityMonitorService
         self.btg_integration = BtgIntegrationService(
+            html_extractor=SimplifiedHtmlExtractor(),
             btg_app_service=self.btg_app_service, 
             ebtg_config=self.config
         )
-    
 
         
         logger.info("EbtgAppService initialized.")
@@ -417,9 +418,7 @@ class EbtgAppService:
             raise EbtgProcessingError(f"Failed to open EPUB {epub_path}: {e}") from e
 
         xhtml_items: List[EpubXhtmlItem] = self.epub_processor.get_xhtml_items()
-        # html_extractor는 BtgIntegrationService 내부 또는 여기서 직접 사용될 수 있습니다.
-        html_extractor_instance = SimplifiedHtmlExtractor() # 인스턴스 생성
-
+        
 
         if not xhtml_items:
             logger.warning(f"No XHTML items found in {epub_path}. Returning empty text.")
@@ -430,7 +429,7 @@ class EbtgAppService:
             logger.debug(f"Extracting text from XHTML item: {xhtml_item.filename}")
             try:
                 original_xhtml_content_str = xhtml_item.original_content_bytes.decode('utf-8', errors='replace')
-                content_items = self.html_extractor.extract_content(original_xhtml_content_str)
+                content_items = self.html_extractor_instance.extract_content(original_xhtml_content_str)
                 for element_obj in content_items: # Renamed item_dict to element_obj for clarity
                     if isinstance(element_obj, TextBlock):
                         if element_obj.text_content and element_obj.text_content.strip(): # Ensure non-empty, stripped text
@@ -517,8 +516,6 @@ class EbtgAppService:
                 self.btg_app_service.load_app_config() # BTG 서비스 재초기화 (새 설정 적용)
                 logger.info("BTG AppService re-configured for the current translation run based on EBTG's lorebook strategy.")
             # --- BTG AppService 설정 준비 완료 ---
-            # html_extractor는 BtgIntegrationService 내부 또는 여기서 직접 사용될 수 있습니다.
-            html_extractor_instance = SimplifiedHtmlExtractor() # 인스턴스 생성
 
 
             xhtml_items: list[EpubXhtmlItem] = self.epub_processor.get_xhtml_items()
@@ -575,7 +572,7 @@ class EbtgAppService:
                     original_xhtml_content_str = xhtml_item.original_content_bytes.decode('utf-8', errors='replace')
                     
                     # Phase 2: Extract ExtractedContentElement list
-                    extracted_elements: List[ExtractedContentElement] = html_extractor_instance.extract_content(original_xhtml_content_str)
+                    extracted_elements: List[ExtractedContentElement] = self.html_extractor_instance.extract_content(original_xhtml_content_str)
 
                     if not extracted_elements:
                         logger.warning(f"No content elements extracted from {item_filename} by SimplifiedHtmlExtractor. Keeping original content.")
