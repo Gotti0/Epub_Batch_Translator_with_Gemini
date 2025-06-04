@@ -65,7 +65,6 @@ class EbtgAppService:
         self.epub_validator = EpubValidationService() # Initialize EpubValidationService
         self.quality_monitor = QualityMonitorService() # Initialize QualityMonitorService
         self.btg_integration = BtgIntegrationService(
-            html_extractor=SimplifiedHtmlExtractor(),
             btg_app_service=self.btg_app_service, 
             ebtg_config=self.config
         )
