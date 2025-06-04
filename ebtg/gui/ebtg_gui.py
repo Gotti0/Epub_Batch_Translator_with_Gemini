@@ -240,7 +240,6 @@ class EbtgGui:
         if self.ebtg_app_service:
             # Defer loading settings to UI until the event loop is idle
             self.root.after(0, self._initialize_ui_with_settings)
-            self.root.after(100, self._update_btg_dynamic_lorebook_ui_state) # 로드 후 UI 상태 업데이트
         else:
             # Disable start button if service failed to initialize
             if hasattr(self, 'start_button'): self.start_button.config(state=tk.DISABLED)
@@ -252,7 +251,6 @@ class EbtgGui:
             return
         self._load_ebtg_settings_to_ui()
         self._update_model_list_ui() # This might show message boxes if API fails
-        self._update_btg_dynamic_lorebook_ui_state() # 설정 로드 후 UI 상태 업데이트
 
         def set_initial_focus():
             if not self.root.winfo_exists(): # Check if root window still exists
@@ -418,10 +416,21 @@ class EbtgGui:
         self.ebtg_segment_char_limit_entry = ttk.Entry(ebtg_specific_frame, width=10)
         Tooltip(self.ebtg_segment_char_limit_entry, "XHTML 콘텐츠 아이템, 일반 텍스트 청크 번역 시 각 세그먼트/청크의 목표 글자 수입니다.\n0 또는 음수이면 나누지 않습니다. (기본값: 4000)")
         self.ebtg_segment_char_limit_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        self.ebtg_segment_char_limit_entry.insert(0, "4000")
+
+        ttk.Label(ebtg_specific_frame, text="EBTG 로어북 최대 주입 항목 수:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.ebtg_max_lorebook_entries_injection_entry = ttk.Entry(ebtg_specific_frame, width=5)
+        Tooltip(self.ebtg_max_lorebook_entries_injection_entry, "EBTG 자체 로어북 사용 시, 하나의 번역 요청에 주입될 로어북 항목의 최대 개수입니다. (기본값: 5)")
+        self.ebtg_max_lorebook_entries_injection_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(ebtg_specific_frame, text="EBTG 로어북 최대 주입 문자 수:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.ebtg_max_lorebook_chars_injection_entry = ttk.Entry(ebtg_specific_frame, width=10)
+        Tooltip(self.ebtg_max_lorebook_chars_injection_entry, "EBTG 자체 로어북 사용 시, 하나의 번역 요청에 주입될 로어북 내용의 최대 글자 수입니다. (기본값: 1000)")
+        self.ebtg_max_lorebook_chars_injection_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+
 
         # 언어 설정 (BTG Module)
         language_settings_frame = ttk.LabelFrame(settings_frame, text="언어 설정 (BTG Module)", padding="10")
+        # Note: This frame might be better placed within a "BTG Module Specific Settings" collapsible section if UI gets too crowded.
         language_settings_frame.pack(fill="x", padx=5, pady=5)
         ttk.Label(language_settings_frame, text="번역 출발 언어 (BTG):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.btg_novel_language_entry = ttk.Entry(language_settings_frame, width=10)
@@ -458,22 +467,7 @@ class EbtgGui:
         Tooltip(self.btg_min_chunk_size_entry, "콘텐츠 안전 문제로 텍스트를 나눌 때, 허용되는 최소 글자 수입니다. (기본값: 100)")
         self.btg_min_chunk_size_entry.grid(row=2, column=1, sticky="w")
 
-        # 동적 로어북 주입 설정 (BTG Module)
-        dyn_lorebook_frame = ttk.LabelFrame(settings_frame, text="동적 로어북 주입 (BTG Module)", padding="10")
-        dyn_lorebook_frame.pack(fill="x", padx=5, pady=5)
-        self.btg_enable_dynamic_lorebook_var = tk.BooleanVar()
-        self.btg_enable_dynamic_lorebook_check = ttk.Checkbutton(dyn_lorebook_frame, text="동적 로어북 주입 활성화", variable=self.btg_enable_dynamic_lorebook_var)
-        Tooltip(self.btg_enable_dynamic_lorebook_check, "번역 시 로어북(용어집)의 내용을 동적으로 프롬프트에 주입할지 여부입니다.")
-        self.btg_enable_dynamic_lorebook_check.grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(dyn_lorebook_frame, text="청크당 최대 주입 항목 수:").grid(row=1, column=0, sticky="w")
-        self.btg_max_lorebook_entries_injection_entry = ttk.Entry(dyn_lorebook_frame, width=5)
-        Tooltip(self.btg_max_lorebook_entries_injection_entry, "하나의 번역 요청(청크)에 주입될 로어북 항목의 최대 개수입니다. (기본값: 3)")
-        self.btg_max_lorebook_entries_injection_entry.grid(row=1, column=1, sticky="w")
-        ttk.Label(dyn_lorebook_frame, text="청크당 최대 주입 문자 수:").grid(row=2, column=0, sticky="w")
-        self.btg_max_lorebook_chars_injection_entry = ttk.Entry(dyn_lorebook_frame, width=10)
-        Tooltip(self.btg_max_lorebook_chars_injection_entry, "하나의 번역 요청(청크)에 주입될 로어북 내용의 최대 글자 수입니다. (기본값: 500)")
-        self.btg_max_lorebook_chars_injection_entry.grid(row=2, column=1, sticky="w")
-
+        
         # 설정 저장/로드 버튼
         action_frame = ttk.Frame(settings_frame, padding="10")
         action_frame.pack(fill="x", padx=5, pady=10) # type: ignore
@@ -643,7 +637,6 @@ class EbtgGui:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
                 self._display_btg_lorebook_content(content)
-                self._update_btg_dynamic_lorebook_ui_state() # 로어북 파일 변경 시 UI 상태 업데이트
                 logging.getLogger(__name__).info(f"BTG 로어북 파일 로드 및 표시됨: {filepath}")
             except Exception as e:
                 messagebox.showerror("오류", f"로어북 파일 로드 실패: {e}")
@@ -651,7 +644,6 @@ class EbtgGui:
                 # Clear display and path if loading fails
                 self._display_btg_lorebook_content("")
                 self.btg_lorebook_json_path_entry.delete(0, tk.END)
-                self._update_btg_dynamic_lorebook_ui_state() # 실패 시에도 업데이트
 
     def _browse_service_account_file(self):
         filepath = filedialog.askopenfilename(title="서비스 계정 JSON 파일 선택", filetypes=(("JSON 파일", "*.json"), ("모든 파일", "*.*")))
@@ -733,6 +725,14 @@ class EbtgGui:
         except ValueError:
             config_data["segment_character_limit"] = 4000 # 기본값
             messagebox.showwarning("입력 오류", "세그먼트 목표 문자 수는 숫자여야 합니다. 기본값(4000)으로 설정됩니다.")
+        try:
+            config_data["ebtg_max_lorebook_entries_injection"] = int(self.ebtg_max_lorebook_entries_injection_entry.get() or "5")
+        except ValueError:
+            config_data["ebtg_max_lorebook_entries_injection"] = 5
+        try:
+            config_data["ebtg_max_lorebook_chars_injection"] = int(self.ebtg_max_lorebook_chars_injection_entry.get() or "1000")
+        except ValueError:
+            config_data["ebtg_max_lorebook_chars_injection"] = 1000
         
         # BTG module related settings (to be stored in ebtg_config.json, under a sub-key or flattened)
         # The universal_translation_prompt from EBTG will also be used by BTG if EBTG calls BTG.
@@ -782,12 +782,8 @@ class EbtgGui:
         try: btg_config["min_content_safety_chunk_size"] = int(self.btg_min_chunk_size_entry.get() or "100")
         except ValueError: btg_config["min_content_safety_chunk_size"] = 100
         
-        btg_config["enable_dynamic_lorebook_injection"] = self.btg_enable_dynamic_lorebook_var.get()
-        try: btg_config["max_lorebook_entries_per_chunk_injection"] = int(self.btg_max_lorebook_entries_injection_entry.get() or "3")
-        except ValueError: btg_config["max_lorebook_entries_per_chunk_injection"] = 3
-        try: btg_config["max_lorebook_chars_per_chunk_injection"] = int(self.btg_max_lorebook_chars_injection_entry.get() or "500")
-        except ValueError: btg_config["max_lorebook_chars_per_chunk_injection"] = 500
-
+        # BTG's enable_dynamic_lorebook_injection and related limits are no longer controlled by EBTG GUI.
+        # They will rely on BTG's own config defaults or values set in ebtg_config.json if EBTG doesn't inject its own.
         # BTG Lorebook Management Tab settings (these are also part of BTG config)
         btg_config["lorebook_json_path"] = self.btg_lorebook_json_path_entry.get().strip() or None
         btg_config["lorebook_sampling_ratio"] = self.btg_sample_ratio_scale.get()
@@ -821,7 +817,6 @@ class EbtgGui:
         except Exception as e: # type: ignore
             messagebox.showerror("오류", f"EBTG 설정 저장 중 예상치 못한 오류: {e}") # 이미 한국어
         finally:
-            self._update_btg_dynamic_lorebook_ui_state() # 저장 후 UI 상태 업데이트
             logging.getLogger(__name__).error(f"EBTG 설정 저장 중 오류: {e}", exc_info=True)
 
     def _load_ebtg_settings_to_ui(self):
@@ -836,6 +831,11 @@ class EbtgGui:
         self.universal_translation_prompt_text.insert('1.0', config.get("universal_translation_prompt", self.ebtg_app_service.config_manager.get_default_config()["universal_translation_prompt"]))
         self.ebtg_segment_char_limit_entry.delete(0, tk.END)
         self.ebtg_segment_char_limit_entry.insert(0, str(config.get("segment_character_limit", 4000)))
+        self.ebtg_max_lorebook_entries_injection_entry.delete(0, tk.END)
+        self.ebtg_max_lorebook_entries_injection_entry.insert(0, str(config.get("ebtg_max_lorebook_entries_injection", 5)))
+        self.ebtg_max_lorebook_chars_injection_entry.delete(0, tk.END)
+        self.ebtg_max_lorebook_chars_injection_entry.insert(0, str(config.get("ebtg_max_lorebook_chars_injection", 1000)))
+
 
         # BTG module related settings
         self.api_keys_text.delete('1.0', tk.END)
@@ -873,11 +873,8 @@ class EbtgGui:
         self.btg_min_chunk_size_entry.delete(0, tk.END)
         self.btg_min_chunk_size_entry.insert(0, str(config.get("min_content_safety_chunk_size", 100)))
 
-        self.btg_enable_dynamic_lorebook_var.set(config.get("enable_dynamic_lorebook_injection", False))
-        self.btg_max_lorebook_entries_injection_entry.delete(0, tk.END)
-        self.btg_max_lorebook_entries_injection_entry.insert(0, str(config.get("max_lorebook_entries_per_chunk_injection", 3)))
-        self.btg_max_lorebook_chars_injection_entry.delete(0, tk.END)
-        self.btg_max_lorebook_chars_injection_entry.insert(0, str(config.get("max_lorebook_chars_per_chunk_injection", 500)))
+        # BTG's enable_dynamic_lorebook_injection and related limits are no longer loaded here as UI is removed.
+
 
         # Load BTG Lorebook Management Tab settings
         self.btg_lorebook_json_path_entry.delete(0, tk.END)
@@ -898,7 +895,6 @@ class EbtgGui:
         self.btg_lorebook_priority_text.insert('1.0', json.dumps(config.get("lorebook_priority_settings", {"character": 5, "worldview": 5, "story_element": 5}), indent=2))
         
         self._toggle_vertex_fields() # Update UI state based on loaded config
-        self._update_btg_dynamic_lorebook_ui_state() # 설정 로드 후 UI 상태 업데이트
         logging.getLogger(__name__).info("EBTG 설정 UI에 로드 완료.")
 
     def _translation_task_runner(self, input_path, output_path):
@@ -1149,13 +1145,11 @@ class EbtgGui:
                     with open(result_json_path, 'r', encoding='utf-8') as f_res:
                         lore_content_to_display = f_res.read() # Read content while file is open
                     self.root.after(0, lambda content=lore_content_to_display: self._display_btg_lorebook_content(content)) # Pass content to lambda
-                self.root.after(0, self._update_btg_dynamic_lorebook_ui_state) # 추출 후 UI 상태 업데이트
             except (BtgFileHandlerException, BtgApiClientException, BtgServiceException, BtgBusinessLogicException) as e_btg:
                 logging.getLogger(__name__).error(f"로어북 추출 중 BTG 예외: {e_btg}", exc_info=True)
                 self.root.after(0, lambda exc=e_btg: messagebox.showerror("추출 오류", f"로어북 추출 중 오류: {exc}")) # 이미 한국어
             except Exception as e_unknown: # type: ignore
                 logging.getLogger(__name__).error(f"로어북 추출 중 알 수 없는 예외: {e_unknown}", exc_info=True)
-                self.root.after(0, lambda exc=e_unknown: messagebox.showerror("알 수 없는 오류", f"로어북 추출 중 예상치 못한 오류: {exc}")) # 이미 한국어
             finally:
                 logging.getLogger(__name__).info("로어북 추출 스레드 종료.") # 이미 한국어
                 self.root.after(0, self._update_btg_dynamic_lorebook_ui_state) # 스레드 종료 후 UI 상태 업데이트
@@ -1200,37 +1194,7 @@ class EbtgGui:
         secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def _update_btg_dynamic_lorebook_ui_state(self):
-        """
-        EBTG 자체 로어북 사용 여부에 따라 BTG의 동적 로어북 주입 관련 UI 요소들의 상태를 업데이트합니다.
-        """
-        if not self.ebtg_app_service:
-            return
-
-        # EBTG가 자체 로어북을 사용하는지 확인 (ebtg_lorebook_entries가 채워져 있는지)
-        ebtg_uses_own_lorebook = bool(self.ebtg_app_service.ebtg_lorebook_entries)
-
-        btg_dynamic_injection_widgets_state = tk.DISABLED if ebtg_uses_own_lorebook else tk.NORMAL
-        
-        # BTG의 동적 로어북 주입 관련 위젯들 상태 변경
-        if hasattr(self, 'btg_enable_dynamic_lorebook_check'):
-            self.btg_enable_dynamic_lorebook_check.config(state=btg_dynamic_injection_widgets_state)
-        if hasattr(self, 'btg_max_lorebook_entries_injection_entry'):
-            self.btg_max_lorebook_entries_injection_entry.config(state=btg_dynamic_injection_widgets_state)
-        if hasattr(self, 'btg_max_lorebook_chars_injection_entry'):
-            self.btg_max_lorebook_chars_injection_entry.config(state=btg_dynamic_injection_widgets_state)
-
-        # 상태 메시지 (예시 - 별도 레이블 추가 필요 또는 Tooltip 변경)
-        if ebtg_uses_own_lorebook:
-            # 예: Tooltip 변경 또는 상태바 메시지
-            if hasattr(self, 'btg_enable_dynamic_lorebook_check'):
-                 Tooltip(self.btg_enable_dynamic_lorebook_check, "EBTG 자체 로어북 사용 중. 이 설정은 무시됩니다.")
-            logging.getLogger(__name__).info("EBTG 자체 로어북 활성됨. BTG 동적 주입 UI 비활성화.")
-        else:
-            if hasattr(self, 'btg_enable_dynamic_lorebook_check'):
-                 Tooltip(self.btg_enable_dynamic_lorebook_check, "번역 시 로어북(용어집)의 내용을 동적으로 프롬프트에 주입할지 여부입니다.")
-            logging.getLogger(__name__).info("EBTG 자체 로어북 비활성. BTG 동적 주입 UI 활성화.")
-
+    
 if __name__ == '__main__':
     # This allows direct execution of the GUI script for testing.
     # Ensure ebtg_app_service.py and other dependencies are in the PYTHONPATH
