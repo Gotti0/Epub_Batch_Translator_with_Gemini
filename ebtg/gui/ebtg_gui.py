@@ -1047,31 +1047,41 @@ class EbtgGui:
         else:
             self.progress_bar['value'] = 0 # Handle division by zero if total_files is 0
 
-        # Initialize status_msg with the base status message
-        status_msg = f"{progress_dto.status_message} "
+        # Build status message step-by-step
+        current_status_parts = []
+        if progress_dto.status_message: # Message from the service (e.g., "EPUB 처리 시작...", "파일 처리 중:")
+            current_status_parts.append(progress_dto.status_message)
         if progress_dto.current_file_name:
-            status_msg += f"({progress_dto.current_file_name}) "
+            # Avoid duplicating filename if status_message already contains it (common pattern)
+            if progress_dto.current_file_name not in progress_dto.status_message:
+                current_status_parts.append(f"({progress_dto.current_file_name})")
+        
         
         # 파일 진행률 부분은 DTO에서 가져오고, 시간 부분은 실시간으로 계산
         files_progress_str = f"{progress_dto.processed_files}/{progress_dto.total_files} 파일"
+        current_status_parts.append(files_progress_str)
         
-        time_info_str = ""
+        
+        time_info_str_parts = []
         if self.translation_start_time is not None and progress_dto.total_files >= 0: # total_files가 0일 수도 있음
             elapsed_seconds = time.monotonic() - self.translation_start_time
             formatted_elapsed = self._format_time(elapsed_seconds)
-            time_info_str = f" (경과: {formatted_elapsed}"
+            time_info_str_parts.append(f"경과: {formatted_elapsed}")
 
             if progress_dto.processed_files > 0 and progress_dto.processed_files < progress_dto.total_files:
                 avg_time_per_file = elapsed_seconds / progress_dto.processed_files
                 remaining_files = progress_dto.total_files - progress_dto.processed_files
                 eta_seconds = remaining_files * avg_time_per_file
                 formatted_eta = self._format_time(eta_seconds)
-                time_info_str += f", ETA: {formatted_eta}"
-            time_info_str += ")"
-        
-        status_msg = f"{files_progress_str}{time_info_str}"
+                time_info_str_parts.append(f"ETA: {formatted_eta}")
 
-        if progress_dto.errors_count > 0: status_msg += f", Errors: {progress_dto.errors_count}"
+        
+        if time_info_str_parts:
+            current_status_parts.append(f"({', '.join(time_info_str_parts)})")
+        if progress_dto.errors_count > 0:
+            current_status_parts.append(f"Errors: {progress_dto.errors_count}")
+        
+        status_msg = " ".join(part for part in current_status_parts if part) # Join non-empty parts
         self.status_var.set(status_msg)
 
     def _update_lorebook_extraction_progress(self, dto: LorebookExtractionProgressDTO):
