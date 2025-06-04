@@ -816,7 +816,6 @@ class EbtgGui:
             logging.getLogger(__name__).info("EBTG 설정 저장됨.")
         except Exception as e: # type: ignore
             messagebox.showerror("오류", f"EBTG 설정 저장 중 예상치 못한 오류: {e}") # 이미 한국어
-        finally:
             logging.getLogger(__name__).error(f"EBTG 설정 저장 중 오류: {e}", exc_info=True)
 
     def _load_ebtg_settings_to_ui(self):

@@ -28,8 +28,7 @@ from btg_module.file_handler import read_json_file as btg_read_json_file # To av
 from collections import defaultdict
 from .ebtg_dtos import TranslateTextChunksRequestDto, TranslateTextChunksResponseDto
 
-# Define a unique separator for merging text chunks
-EBTG_MERGE_SEPARATOR = "\n<EBTG_TEXT_SEPARATOR_DO_NOT_TRANSLATE_THIS_TAG/>\n"
+EBTG_MERGE_SEPARATOR = "||EBTG_SEP||"
 
 
 
@@ -356,12 +355,10 @@ class EbtgAppService:
                     "\n\nIMPORTANT_CHUNK_PROCESSING_NOTE: The text provided in the '{{slot}}' for translation may contain "
                     f"multiple distinct pieces separated by the special marker '{EBTG_MERGE_SEPARATOR}'. "
                     "When you encounter this marker, you MUST translate each piece independently. "
-                    "In your final XHTML fragment output, ensure that the translations of these pieces are also "
-                    f"separated by the exact same marker string '{EBTG_MERGE_SEPARATOR}' "
-                    "placed directly between their respective surrounding paragraph tags. "
-                    "For example, if input for the slot is 'Text A<EBTG_TEXT_SEPARATOR_DO_NOT_TRANSLATE_THIS_TAG/>Text B', " # Simplified example for clarity
-                    "your translated output for the slot (after your translation and wrapping) should be "
-                    "'<p>[Translated Text A]</p><EBTG_TEXT_SEPARATOR_DO_NOT_TRANSLATE_THIS_TAG/><p>[Translated Text B]</p>'. "
+                    "In your final XHTML fragment output, ensure that the translations of these pieces are also separated by the exact same marker string "
+                    f"'{EBTG_MERGE_SEPARATOR}' placed directly between their respective surrounding paragraph tags. "
+                    "For example, if input for the slot is 'Text A||EBTG_SEP||Text B', "
+                    "your translated output for the slot (after your translation and wrapping) should be '<p>[Translated Text A]</p>||EBTG_SEP||<p>[Translated Text B]</p>'. "
                     "Preserve this separator meticulously in the output if it was in the input text for the slot."
                 )
                 # Add the instruction to the main prompt template.
